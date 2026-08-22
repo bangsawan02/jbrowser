@@ -84,6 +84,21 @@ import timber.log.Timber
  * While the cursor is on screen, [KeyEvent.KEYCODE_MEDIA_FAST_FORWARD] / [KeyEvent.KEYCODE_MEDIA_REWIND]
  * dispatch a synthetic mouse wheel scroll up / down at the cursor point (see [dispatchScroll]); when
  * the cursor is off, they fall through to the activity's per-video seek.
+ *
+ * ## Context menu via the action key
+ * While the cursor is on screen, a **deliberate long press** of the action key
+ * ([KeyEvent.KEYCODE_DPAD_CENTER] / [KeyEvent.KEYCODE_ENTER] / [KeyEvent.KEYCODE_BUTTON_A] —
+ * see [isConfirmKey], held for [ACTION_LONG_PRESS_MS]) performs a long press at the cursor and so
+ * opens the WebView's built-in context menu for the element under it (the same menu a touch long
+ * press would open). A **short** press is the normal click at the cursor: the click is deferred to
+ * the key UP so a held press can still be reclassified as a long press while it is held.
+ *
+ * The threshold is deliberately ~1 s and *not* the system long-press timeout: a human "short
+ * click" on a remote is routinely held 400-700 ms — past the ~400 ms at which the OS starts
+ * flagging the key with [KeyEvent.FLAG_LONG_PRESS] — and the system flag must therefore be
+ * ignored here, or hesitant clicks would open the context menu instead of clicking.
+ *
+ * With the cursor off the action key falls through to its normal meaning.
  */
 class CursorController(
     private val overlay: CursorView,
@@ -136,6 +151,26 @@ class CursorController(
         toggle()
     }
 
+    // --- Context-menu (action-key long press) state --------------------------
+    // A short press of the action key is a click at the cursor (fired on the key UP); a deliberate
+    // hold of [ACTION_LONG_PRESS_MS] opens the context menu. The DOWN arms the timer, the UP
+    // resolves the press: if the timer already fired for this press, the UP is consumed. The OS's
+    // own long-press flag (raised after the ~400 ms system timeout) is deliberately NOT honored
+    // here — a human "short click" is routinely held that long, and acting on it would open the
+    // menu instead of clicking.
+
+    private var actionLongPressHandled = false
+    private val actionLongPress = Runnable {
+        actionLongPressHandled = true
+        dispatchLongPress()
+    }
+
+    // Diagnostic: accumulates the raw action-key event sequence of the current press
+    // ("d23(r0)" = DOWN keycode 23 repeat 0, "u23" = UP ...) and logs it when the press
+    // resolves on UP. This makes a misbehaving remote's event shape (a duplicated DOWN or
+    // extra UP for one physical press, e.g. some Bluetooth remotes) visible in logcat.
+    private val actionPressEvents = mutableListOf<String>()
+
     // --- Fade state ---------------------------------------------------------
 
     private val fadeRunnable = Runnable { hideCursor() }
@@ -165,10 +200,35 @@ class CursorController(
             return true
         }
 
-        // The select button clicks whenever the cursor is on screen — whether it got there via
-        // cursor mode or the right stick.
+        // The action key (select / DPAD center / ENTER / BUTTON_A) drives the primary interaction
+        // whenever the cursor is on screen — whether it got there via cursor mode or the right
+        // stick. A short press is a click at the cursor; a long press performs a long press there
+        // and so opens the WebView's context menu for the element under the cursor. The click
+        // fires on ACTION_UP, so a DOWN arms the long-press timer and the UP resolves the press.
         if (isConfirmKey(event.keyCode) && (enabled || shown)) {
-            if (event.action == KeyEvent.ACTION_UP) dispatchClick()
+            when (event.action) {
+                KeyEvent.ACTION_DOWN -> {
+                    actionPressEvents += "d${event.keyCode}(r${event.repeatCount})"
+                    if (actionLongPressHandled) return true // already fired for this press
+                    if (event.repeatCount == 0) {
+                        handler.removeCallbacks(actionLongPress)
+                        handler.postDelayed(actionLongPress, ACTION_LONG_PRESS_MS)
+                    }
+                    // Note: we intentionally do NOT react to event.isLongPress here — the OS
+                    // raises it after the ~400 ms system timeout, and a human "short click" is
+                    // routinely held that long (see the class KDoc). Only the deliberate
+                    // ACTION_LONG_PRESS_MS hold counts.
+                }
+                KeyEvent.ACTION_UP -> {
+                    actionPressEvents += "u${event.keyCode}"
+                    handler.removeCallbacks(actionLongPress)
+                    val longPressed = actionLongPressHandled
+                    actionLongPressHandled = false
+                    Timber.d("Cursor: action-key press resolved longPress=$longPressed events=[${actionPressEvents.joinToString("")}]")
+                    actionPressEvents.clear()
+                    if (!longPressed) dispatchClick()
+                }
+            }
             return true
         }
 
@@ -264,6 +324,7 @@ class CursorController(
     /** Detach lifecycle hooks; call from the activity's onDestroy. */
     fun release() {
         handler.removeCallbacks(hotkeyLongPress)
+        handler.removeCallbacks(actionLongPress)
         handler.removeCallbacks(fadeRunnable)
         stopLoop()
     }
@@ -461,6 +522,103 @@ class CursorController(
         }, CLICK_DELAY_MS)
     }
 
+    /**
+     * Open the WebView's built-in context menu for the element under the cursor by performing a
+     * long press. Like [dispatchClick] this is a synthetic **touch** (not a mouse button) — the
+     * WebView's long-press detector (and thus its context menu) only reacts to the touch path.
+     *
+     * The hold is terminated with a **late ACTION_CANCEL**, dispatched *after* the long-press
+     * dialog has appeared. Why, measured against the real input pipeline (DOM event log in
+     * `scripts/tests/assets/longpress_log.html`):
+     *
+     *  - A real finger produces `ts … pc/ctx@~540ms tc@~564ms`. At ~560 ms the dialog window
+     *    steals window focus (logcat: `onWindowFocusChanged` at ~561 ms after DOWN), and the
+     *    input pipeline — which is tracking the in-progress touch — delivers the `tc`
+     *    (touchcancel) to the WebView. That cancel cleanly releases the renderer's long-press
+     *    input state; real long presses never wedge the page.
+     *  - Our synthetic DOWN is dispatched straight to the view, bypassing the input pipeline,
+     *    so the pipeline never sees it and never delivers that focus-loss cancel. The renderer
+     *    keeps the touch's long-press state active. Terminating with an **UP** wedges that
+     *    state: after ~2 long presses the page stops receiving *any* input — even real
+     *    hardware taps — until a reload, and a late UP can be read as a stray click (the
+     *    original "context menu opens and the page also navigates" symptom).
+     *  - A **CANCEL** also has to land *after* the dialog has appeared: one sent early
+     *    (~550 ms, before the focus change at ~561 ms) wedged the state just like an UP.
+     *    Hence the delay: the cancel goes out at [longPressHoldMs] + [LONGPRESS_LATE_CANCEL_MS]
+     *    (~850 ms), comfortably past the dialog's focus steal.
+     *
+     * The events carry the **same provenance as real touchscreen events** —
+     * [InputDevice.SOURCE_TOUCHSCREEN] and [TOUCH_DEVICE_ID] — built with the full
+     * [MotionEvent.obtain] constructor. The renderer matches in-progress touches by
+     * device/pointer identity: a cancel built with the deprecated
+     * `obtain(downTime, eventTime, action, x, y, metaState)` constructor (source
+     * SOURCE_UNKNOWN, deviceId -1) is *not* matched to the tracked touch and is ignored,
+     * which wedged the gesture state exactly like an UP. With matching provenance the
+     * cancel is honored, the same as the pipeline's focus-loss cancel on a real touch.
+     * A CANCEL (unlike an UP) can never produce a page click, and it is the exact event
+     * the real pipeline sends in this situation — so repeated long presses leave the
+     * renderer clean. Regression test:
+     * `test_cursor_context_menu_repeated_long_press_touch_stays_clean`.
+     */
+    private fun dispatchLongPress() {
+        val target = targetProvider() ?: return
+        wakeCursor()
+        val (x, y) = targetCoords(target)
+        Timber.d("Cursor: long press (context menu) at target ($x, $y)")
+        dispatchHover()
+        val downTime = SystemClock.uptimeMillis()
+        val down = touchEvent(downTime, downTime, MotionEvent.ACTION_DOWN, x, y)
+        try {
+            target.dispatchTouchEvent(down)
+        } finally {
+            down.recycle()
+        }
+        // Terminate the gesture with a CANCEL once the dialog is on screen (see the KDoc). The
+        // posted delay starts counting from now, so the total hold is
+        // longPressHoldMs() + LONGPRESS_LATE_CANCEL_MS.
+        val cancelMs = longPressHoldMs() + LONGPRESS_LATE_CANCEL_MS
+        handler.postDelayed({
+            // Only terminate the gesture on the very view that received the DOWN. If the tab
+            // changed in the window, an orphan cancel would land on a fresh WebView and could
+            // corrupt its touch state; the old view is going away anyway.
+            val t = targetProvider() ?: return@postDelayed
+            if (t !== target) return@postDelayed
+            val cancel = touchEvent(downTime, SystemClock.uptimeMillis(), MotionEvent.ACTION_CANCEL, x, y)
+            try {
+                t.dispatchTouchEvent(cancel)
+            } finally {
+                cancel.recycle()
+            }
+            Timber.d("Cursor: long press CANCEL dispatched (%d ms after DOWN)", cancelMs)
+        }, cancelMs)
+    }
+
+    /**
+     * A touch [MotionEvent] with the provenance of a real touchscreen event:
+     * [InputDevice.SOURCE_TOUCHSCREEN] and a real device id (0 — the id InputDispatcher
+     * uses for the primary touchscreen). The renderer's gesture tracker matches
+     * in-progress touches by device/pointer identity, so a follow-up event with a
+     * different source/deviceId (e.g. from the deprecated
+     * `MotionEvent.obtain(downTime, eventTime, action, x, y, metaState)` constructor)
+     * does not reach the tracked gesture.
+     */
+    private fun touchEvent(downTime: Long, eventTime: Long, action: Int, x: Float, y: Float): MotionEvent =
+        MotionEvent.obtain(
+            downTime, eventTime, action, 1,
+            arrayOf(MotionEvent.PointerProperties().also { it.id = 0; it.toolType = MotionEvent.TOOL_TYPE_FINGER }),
+            arrayOf(MotionEvent.PointerCoords().also { it.x = x; it.y = y; it.pressure = 1f; it.size = 1f }),
+            0, 0, 1f, 1f, TOUCH_DEVICE_ID, 0,
+            InputDevice.SOURCE_TOUCHSCREEN, 0
+        )
+
+    /**
+     * How long to hold the long-press touch DOWN before the terminating CANCEL is scheduled
+     * (ms). This is the base hold; [dispatchLongPress] adds [LONGPRESS_LATE_CANCEL_MS] so the
+     * cancel lands *after* the long-press dialog has appeared and stolen window focus.
+     */
+    private fun longPressHoldMs(): Long =
+        (ViewConfiguration.getLongPressTimeout() + LONGPRESS_MARGIN_MS).toLong()
+
     // setActionButton is @hide but needed for ACTION_BUTTON_PRESS/RELEASE (api=unsupported,test-api → allowed).
     private val setActionButtonMethod: Method? by lazy {
         try {
@@ -624,6 +782,10 @@ class CursorController(
     companion object {
         val HOTKEY_LONG_PRESS_MS: Long =
             ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(500L)
+        // Deliberate-hold threshold for the action-key context menu (ms). Deliberately well past
+        // the system long-press timeout (~400 ms) and the range a human "short click" is held in
+        // (up to ~700 ms), so hesitant clicks still click. See the class KDoc.
+        private const val ACTION_LONG_PRESS_MS = 1000L
         private const val CM_PER_INCH = 2.54f
         // Physical travel speed / acceleration the 1..100 settings map onto.
         private const val SPEED_MIN_CM_S = 1.5f
@@ -637,6 +799,19 @@ class CursorController(
         private const val FADE_ANIM_MS = 200L
         // Delay between the pre-click hover (to show controls) and the actual click events (ms).
         private const val CLICK_DELAY_MS = 80L
+        // Extra time past the system long-press timeout to hold a touch DOWN (so it is a long
+        // press even on a slow device), used by the action-key context-menu long press.
+        private const val LONGPRESS_MARGIN_MS = 150L
+        // Extra delay past [longPressHoldMs] before the terminating CANCEL is sent. The cancel
+        // must land *after* the long-press dialog has appeared and stolen window focus (~560 ms
+        // after the DOWN, see [dispatchLongPress]) — one sent before that wedges the renderer's
+        // input state just like an UP. 300 ms keeps it ~300 ms past the focus change even on a
+        // slow device.
+        private const val LONGPRESS_LATE_CANCEL_MS = 300L
+        // Device id for synthetic touchscreen events: the id InputDispatcher uses for the
+        // primary touchscreen. Must match on DOWN and follow-up events or the renderer's
+        // gesture tracker won't match them to the tracked touch (see [touchEvent]).
+        private const val TOUCH_DEVICE_ID = 0
         // Pixels of edge overflow that map to one mouse-wheel notch.
         private const val SCROLL_PX_PER_NOTCH = 40f
         // Wheel notches per fast-forward / rewind press.

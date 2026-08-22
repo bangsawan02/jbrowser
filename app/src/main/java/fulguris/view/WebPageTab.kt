@@ -1266,6 +1266,9 @@ class WebPageTab(
      * @param src Source from the target Image
      */
     private fun longClickPage(url: String?, text: String?, src: String?) {
+        // The touch that triggered the long press (a real finger, or the cursor controller's
+        // synthetic touch) is what populates the hit-test state; it is still current when
+        // this runs.
         val result = webView?.hitTestResult
         val currentUrl = webView?.url
         val newUrl = result?.extra
@@ -1467,8 +1470,10 @@ class WebPageTab(
                 location = y
                 touchingScreen=true
             }
-            // Only show or hide tool bar when the user stop touching the screen otherwise that looks ugly
-            else if (action == MotionEvent.ACTION_UP) {
+            // Only show or hide tool bar when the user stop touching the screen otherwise that looks ugly.
+            // ACTION_CANCEL (e.g. the system or our cursor controller taking the touch over) also ends
+            // the touch — clear the flag there too, or it would stay stuck true after a canceled touch.
+            else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 val distance = y - location
                 touchingScreen=false
                 if (view.scrollY < SCROLL_DOWN_THRESHOLD
@@ -1552,6 +1557,15 @@ class WebPageTab(
                 if (msg != null) {
                     msg.target = webViewHandler
                     webView?.requestFocusNodeHref(msg)
+                    // We handle the long press ourselves (a custom dialog via requestFocusNodeHref),
+                    // so cancel the WebView's own native long-press. Otherwise its renderer keeps
+                    // an internal long-press/context-menu input state "active" (it fired the page's
+                    // contextmenu but never showed/dismissed the native menu) and — after a couple of
+                    // long presses on the same page — stops delivering *any* touch input to the page
+                    // (even real hardware taps) until the page reloads. cancelLongPress() is exactly
+                    // the documented API for "I handled the long press, don't also handle it".
+                    // Regression: test_cursor_context_menu_repeated_long_press_touch_stays_clean.
+                    webView?.cancelLongPress()
                 }
             }
         }
