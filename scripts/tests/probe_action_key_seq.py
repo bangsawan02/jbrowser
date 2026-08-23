@@ -41,17 +41,17 @@ def _arg(name: str, default: str) -> str:
 
 
 def _ensure_cursor_on(device, serial: str) -> None:
-    """Toggle cursor mode ON, verifying via logcat (a faded overlay can't be seen over adb, so a
-    previous run may have left the mode on — a plain _toggle would then turn it OFF)."""
+    """Toggle the cursor ON, verifying via logcat (a faded overlay can't be seen over adb, so a
+    previous run may have left it on — a plain _toggle would then turn it OFF)."""
     for attempt in (1, 2):
         adb._adb(serial, ["shell", "logcat", "-c"])
         cursor_tests._toggle(device)
         log = adb._adb(serial, ["shell", "logcat", "-d"])
         if "Cursor: enable" in log:
-            print(f"cursor mode confirmed ON (attempt {attempt})")
+            print(f"cursor confirmed ON (attempt {attempt})")
             return
-        print(f"attempt {attempt} did not enable cursor mode, retrying...")
-    raise AssertionError("could not confirm cursor mode is ON")
+        print(f"attempt {attempt} did not enable the cursor, retrying...")
+    raise AssertionError("could not confirm the cursor is ON")
 
 
 def main() -> None:

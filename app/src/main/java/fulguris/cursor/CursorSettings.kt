@@ -29,18 +29,32 @@ package fulguris.cursor
  * `cursor` package stays free of app specifics and can be pulled into a standalone library.
  */
 interface CursorSettings {
-    /** Whether the long-press hardware hotkey may toggle cursor mode. The menu item ignores this. */
+    /** Whether the long-press hardware hotkey may toggle the cursor on/off. The menu item ignores this. */
     val hotkeyEnabled: Boolean
 
-    /** Cursor speed, 1..100. Mapped to a physical travel speed (cm/s) using the display's DPI. */
-    val speed: Int
+    /**
+     * Cursor speed, 0..100 (percent). 0 is a valid setting but must be treated as 1 by the
+     * consumer (the slowest usable speed). Mapped to a physical travel speed (cm/s) using the
+     * display's DPI.
+     */
+    val speed: Float
 
-    /** Cursor acceleration, 0..100. Mapped to a physical acceleration (cm/s²) while a direction is held. */
-    val acceleration: Int
+    /** Cursor acceleration, 0..100 (percent). Mapped to a physical acceleration (cm/s²) while a direction is held. */
+    val acceleration: Float
 
     /**
-     * Milliseconds of no cursor movement after which the cursor fades out. 0 means never fade.
+     * Seconds of no cursor movement after which the cursor fades out. 0 means never fade.
      * Any new movement fades it straight back in.
      */
-    val fadeTimeoutMs: Int
+    val fadeTimeoutSec: Float
+
+    /**
+     * Seconds the action key (select / DPAD center / ENTER) must be deliberately held to
+     * perform a long press at the cursor and open the context menu; a shorter press is a click.
+     * The controller clamps this to [minActionHoldSec] so hesitant short clicks never trigger it.
+     */
+    val actionHoldSec: Float
+
+    /** Minimum the controller accepts for [actionHoldSec]: 0.5 s. */
+    val minActionHoldSec: Float
 }

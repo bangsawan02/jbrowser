@@ -31,12 +31,14 @@ FADE_KEY = "pref_key_cursor_fade_timeout"
 
 
 def set_fade(device, value: str) -> None:
-    """Host-rewrite the (unsuffixed) cursor fade pref; app must be stopped."""
+    """Host-rewrite the (unsuffixed) cursor fade pref (seconds, float); app must be stopped."""
     device.force_stop()
     path = f"shared_prefs/{device.package}_preferences.xml"
     xml = device.read_prefs(path)
-    entry = f'<int name="{FADE_KEY}" value="{value}" />'
-    pat = re.compile(rf'<int name="{re.escape(FADE_KEY)}" value="-?\d+" />')
+    entry = f'<float name="{FADE_KEY}" value="{value}" />'
+    # Match a float entry OR a legacy int entry (this pref used to be an int in ms) so a stale
+    # value is replaced, never duplicated.
+    pat = re.compile(rf'<(int|float) name="{re.escape(FADE_KEY)}" value="-?\d+" />')
     xml = pat.sub(entry, xml) if pat.search(xml) else xml.replace("</map>", f"    {entry}\n</map>")
     device.write_prefs(path, xml)
     device.launch()
@@ -49,7 +51,7 @@ def click_coords(device) -> tuple[int, int] | None:
 
 
 def fresh_cursor(device, shot: str) -> tuple[int, int] | None:
-    """Ensure cursor mode is freshly ON (centered) and return the start position."""
+    """Ensure the cursor is freshly ON (centered) and return the start position."""
     if device.find_node(":id/cursorOverlay"):
         device.key_longpress(keys.MEDIA_PLAY_PAUSE, wait=1.2)  # off
         time.sleep(0.5)

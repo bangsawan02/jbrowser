@@ -143,7 +143,7 @@ def main() -> int:
     cursor_tests._ensure_reverse(device)
     cursor_tests._reset_cursor_prefs(device)  # speed 40, accel 20, fade 3000
     tf._set_pref(device, tf.TIMEOUT_KEY, "0", "float", suffixed=True)  # no auto-hide during the probe
-    tf._set_pref(device, tf.FADE_KEY, "0", "int", suffixed=False)     # never fade, so vision is stable
+    tf._set_pref(device, tf.FADE_KEY, "0", "float", suffixed=False)    # never fade, so vision is stable
     device.launch()
     time.sleep(3.0)
     cursor_tests._load_target(device)  # cursor_target.html, cursor OFF
@@ -192,7 +192,7 @@ def main() -> int:
     # leave the cursor off and prefs as the suite default
     tf._ensure_cursor(device, args.serial, "tri_off", want=False)
     tf._set_pref(device, tf.TIMEOUT_KEY, tf.DEFAULT_TIMEOUT, "float", suffixed=True)
-    tf._set_pref(device, tf.FADE_KEY, tf.DEFAULT_FADE, "int", suffixed=False)
+    tf._set_pref(device, tf.FADE_KEY, tf.DEFAULT_FADE, "float", suffixed=False)
     print(f"prefs reset (timeout={tf.DEFAULT_TIMEOUT}, fade={tf.DEFAULT_FADE})")
     return 0
 

@@ -3,7 +3,7 @@
 
 Drives the installed app through busy/real pages (BBC, Wikipedia, YouTube home,
 a YouTube video) and verifies the tool bar auto-hides ~timeout s after each page
-has *fully* loaded, in plain mode AND with cursor mode active. Phase 2 replays
+has *fully* loaded, in plain mode AND with the cursor on. Phase 2 replays
 the exact user-reported stuck case: after an auto-hide, BACK re-shows the tool
 bar (doBackAction -> showActionBar) while the web view already holds focus, and
 the tool bar must auto-hide *again*. Phase 3 (cursor + a YouTube video) plays
@@ -11,7 +11,7 @@ the user's "click on another video in the right rail" workflow with the cursor.
 
 Harness fixes learned from v3/v4 runs:
 
-  * Cursor mode is toggled by TAPPING the "Cursor" item in the main menu
+  * The cursor is toggled by TAPPING the "Cursor" item in the main menu
     (:id/menuItemCursor) - the proven cursor-suite method. v4 sent the long-press
     hotkey while the menu popup was still open, and the popup window consumed the
     key before the activity's dispatchKeyEvent, so the toggle silently failed.
@@ -40,7 +40,7 @@ Measurement (learned the hard way on the slow RPi TV):
   * An empty address field only means "toolbar hid" AFTER load is confirmed -
     during load the field is empty simply because the title is not reported yet.
   * Cursor fade is DISABLED for the run (pref_key_cursor_fade_timeout=0) so the
-    overlay never goes GONE and cursor mode is detectable at any moment.
+    overlay never goes GONE and the cursor state is detectable at any moment.
   * The cookie-consent banner (BBC) is dismissed while the page is still
     loading, so its tap cannot re-arm the countdown.
 
@@ -72,7 +72,7 @@ import adb  # noqa: E402
 TIMEOUT_KEY = "pref_key_hide_tool_bar_timeout"
 FADE_KEY = "pref_key_cursor_fade_timeout"
 DEFAULT_TIMEOUT = "0"
-DEFAULT_FADE = "3000"   # the code default (ms); 0 = never fade
+DEFAULT_FADE = "3"   # the code default (seconds); 0 = never fade
 OUT_DIR = os.path.join(os.path.dirname(__file__), "out")
 
 SITES = {
@@ -86,9 +86,9 @@ SITES = {
 # "Error response" tabs) is reported as a load failure instead of measured.
 EXPECT_HOST = {"bbc": "bbc", "wikipedia": "wikipedia", "youtube": "youtube", "youtube_video": "youtube"}
 
-# (site key, cursor mode on?, click another video?) - the original bug (bbc) first.
-# NOTE: the navigation is ALWAYS done with the cursor OFF (see main()): in cursor
-# mode the confirming ENTER becomes a cursor click, so a typed URL cannot be
+# (site key, cursor on?, click another video?) - the original bug (bbc) first.
+# NOTE: the navigation is ALWAYS done with the cursor OFF (see main()): with the
+# cursor on the confirming ENTER becomes a cursor click, so a typed URL cannot be
 # submitted. A real user is on a page before turning the cursor on, which is
 # exactly what this ordering models.
 SCENARIOS = [
@@ -137,7 +137,7 @@ def _shot(device, serial: str, tag: str) -> str:
 
 
 def _cursor_on(device) -> bool:
-    """Cursor mode is on iff its overlay view is present in the hierarchy.
+    """The cursor is on iff its overlay view is present in the hierarchy.
 
     Only reliable while cursor fade is disabled (pref_key_cursor_fade_timeout=0),
     which the run sets up before any check.
@@ -260,13 +260,13 @@ def _open_menu_cursor_item(device, serial: str, tag: str):
 
 
 def _ensure_cursor(device, serial: str, tag: str, want: bool) -> bool:
-    """Make sure cursor mode matches `want`. Returns True on success.
+    """Make sure the cursor state matches `want`. Returns True on success.
 
     Hotkey-first in both directions (proven by the cursor suite with the menu
     closed); the menu item is the fallback for turning it ON.
     """
     if _cursor_on(device) == want:
-        print(f"    cursor mode already {'on' if want else 'off'}")
+        print(f"    cursor already {'on' if want else 'off'}")
         return True
     _hotkey_toggle(device)
     if _cursor_on(device) != want:
@@ -282,7 +282,7 @@ def _ensure_cursor(device, serial: str, tag: str, want: bool) -> bool:
             _hotkey_toggle(device)  # the first hotkey flipped the wrong way; try once more
     state = _cursor_on(device)
     ok = state == want
-    print(f"    cursor mode {'on' if state else 'off'} (expected {'on' if want else 'off'}) {'OK' if ok else 'MISMATCH'}")
+    print(f"    cursor {'on' if state else 'off'} (expected {'on' if want else 'off'}) {'OK' if ok else 'MISMATCH'}")
     return ok
 
 
@@ -347,7 +347,7 @@ def phase_back_reshow(device, serial: str, tag: str, timeout_s: float, cursor: b
     """Phase 2: the user-reported stuck case.
 
     After the auto-hide, BACK re-shows the toolbar while the web view already
-    holds focus (in cursor mode the overlay is non-focusable, so it ALWAYS
+    holds focus (with the cursor on the overlay is non-focusable, so it ALWAYS
     does). showActionBar must re-arm the consumed countdown, so the toolbar
     auto-hides again. Pre-fix it stayed visible forever.
     """
@@ -426,7 +426,7 @@ def _steer_to_rail(device, serial: str, tag: str, old_title: str) -> bool:
     _wait_new_page detects it after the loop."""
     # The overlay origin in screen space = the offset between the two
     # coordinate systems. Read once from the view hierarchy (the overlay is
-    # present while cursor mode is on and fade is disabled, as in this run).
+    # present while the cursor is on and fade is disabled, as in this run).
     off_x = off_y = 0.0
     ov = device.find_node(":id/cursorOverlay")
     if ov and ov.bounds:
@@ -531,9 +531,9 @@ def main() -> int:
     device = AndroidDevice(args.serial)
     os.makedirs(OUT_DIR, exist_ok=True)
     print(f"=== toolbar field test v6 on {device.label()}  timeout={args.timeout}s ===")
-    # hide timeout -> orientation-suffixed file; cursor fade -> default file.
+    # hide timeout -> orientation-suffixed file; cursor fade (seconds, float) -> default file.
     _set_pref(device, TIMEOUT_KEY, f"{args.timeout:g}", "float", suffixed=True)
-    _set_pref(device, FADE_KEY, "0", "int", suffixed=False)
+    _set_pref(device, FADE_KEY, "0", "float", suffixed=False)
     device.launch()
     time.sleep(3.0)
 
@@ -549,7 +549,7 @@ def main() -> int:
             print(f"[{i}/{len(scenarios)}] {site} ({name}) {url}")
             try:
                 # Always navigate with the cursor OFF: the confirming ENTER is a
-                # cursor click in cursor mode, so the URL could not be submitted.
+                # cursor click with the cursor on, so the URL could not be submitted.
                 device.navigate(url, reset=False)
                 t_load, title = _wait_loaded(device, args.serial, f"s{i:02d}_{site}", EXPECT_HOST[site])
                 if not title or EXPECT_HOST[site] not in title.lower():
@@ -591,10 +591,10 @@ def main() -> int:
                     try:
                         _ensure_cursor(device, args.serial, f"s{i:02d}_{site}_off", want=False)
                     except Exception as e:  # noqa: BLE001
-                        print(f"    !! could not disable cursor mode: {e}")
+                        print(f"    !! could not disable the cursor: {e}")
     finally:
         _set_pref(device, TIMEOUT_KEY, DEFAULT_TIMEOUT, "float", suffixed=True)
-        _set_pref(device, FADE_KEY, DEFAULT_FADE, "int", suffixed=False)
+        _set_pref(device, FADE_KEY, DEFAULT_FADE, "float", suffixed=False)
         print(f"timeout pref reset to {DEFAULT_TIMEOUT}, cursor fade reset to {DEFAULT_FADE}")
 
     print("\n=== summary ===")

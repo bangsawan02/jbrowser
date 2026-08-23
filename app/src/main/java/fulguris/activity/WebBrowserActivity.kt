@@ -252,7 +252,7 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
     private lateinit var tabsDialog: BottomSheetDialog
     private lateinit var bookmarksDialog: BottomSheetDialog
 
-    // Android TV cursor mode. All the logic lives in the self-contained fulguris.cursor package;
+    // Android TV cursor. All the logic lives in the self-contained fulguris.cursor package;
     // this activity only forwards input events and wires the overlay / menu / settings.
     private lateinit var iCursorController: CursorController
     private var iInputManager: InputManager? = null
@@ -261,9 +261,11 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
     private var iCursorTargetOverride: View? = null
     private val iCursorSettings = object : CursorSettings {
         override val hotkeyEnabled: Boolean get() = userPreferences.cursorHotkeyEnabled
-        override val speed: Int get() = userPreferences.cursorSpeed
-        override val acceleration: Int get() = userPreferences.cursorAcceleration
-        override val fadeTimeoutMs: Int get() = userPreferences.cursorFadeTimeoutMs
+        override val speed: Float get() = userPreferences.cursorSpeed
+        override val acceleration: Float get() = userPreferences.cursorAcceleration
+        override val fadeTimeoutSec: Float get() = userPreferences.cursorFadeTimeoutSec
+        override val actionHoldSec: Float get() = userPreferences.cursorActionHoldSec
+        override val minActionHoldSec: Float get() = 0.5F
     }
     // Registered so the Cursor menu item can appear/disappear live as a gamepad is (dis)connected.
     private val iInputDeviceListener = object : InputManager.InputDeviceListener {
@@ -781,8 +783,8 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
             overlay = iBinding.cursorOverlay,
             targetProvider = { iCursorTargetOverride ?: currentTabView },
             settings = iCursorSettings,
-            onModeChanged = { enabled ->
-                application.toast(getString(if (enabled) R.string.cursor_mode_on else R.string.cursor_mode_off))
+            onCursorToggled = { enabled ->
+                application.toast(getString(if (enabled) R.string.cursor_on else R.string.cursor_off))
                 vibrate()
                 if (!enabled) {
                     // Give D-pad navigation a predictable starting point once the cursor is gone.
@@ -793,10 +795,10 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
     }
 
     /**
-     * True when cursor mode should be offered to the user: on Android TV, or whenever a gamepad,
+     * True when the cursor should be offered to the user: on Android TV, or whenever a gamepad,
      * joystick or D-pad-capable remote is currently connected. Queried live when the menu opens.
      */
-    fun isCursorModeAvailable(): Boolean {
+    fun isCursorAvailable(): Boolean {
         if (packageManager.hasSystemFeature("android.software.leanback")) return true
         for (id in InputDevice.getDeviceIds()) {
             val device = InputDevice.getDevice(id) ?: continue
@@ -811,11 +813,11 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         return false
     }
 
-    /** Whether cursor mode is currently on. Used to sync the menu checkbox. */
-    fun isCursorModeEnabled(): Boolean = ::iCursorController.isInitialized && iCursorController.enabled
+    /** Whether the cursor is currently on. Used to sync the menu checkbox. */
+    fun isCursorOn(): Boolean = ::iCursorController.isInitialized && iCursorController.enabled
 
-    /** Toggle cursor mode, wired to both the hotkey and the menu item. */
-    fun toggleCursorMode() {
+    /** Toggle the cursor on/off, wired to both the hotkey and the menu item. */
+    fun toggleCursor() {
         if (::iCursorController.isInitialized) iCursorController.toggle()
     }
 
@@ -846,8 +848,8 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
      * rewind/fast-forward seek ±10s. Works generically wherever a page has an HTML5 video in its
      * top document (cross-origin iframes, e.g. some embeds, are not reachable — a known limitation).
      * Returns true when the key was handled (and consumed). Long-press play/pause is the cursor
-     * toggle, and in cursor mode fast-forward/rewind become a wheel scroll — both handled earlier by
-     * the cursor controller, so only the remaining short presses reach here.
+     * toggle, and while the cursor is on fast-forward/rewind become a wheel scroll — both handled
+     * earlier by the cursor controller, so only the remaining short presses reach here.
      */
     private fun handleMediaKey(event: KeyEvent): Boolean {
         when (event.keyCode) {
@@ -2257,7 +2259,7 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
 
         //Timber.d("dispatchKeyEvent $event")
 
-        // Android TV cursor mode gets first dibs on key events. In particular the media
+        // Android TV cursor gets first dibs on key events. In particular the media
         // play/pause toggle must be intercepted here, before it can reach a page's MediaSession
         // (e.g. a playing video), and D-pad presses drive the cursor rather than focus navigation.
         if (::iCursorController.isInitialized && iCursorController.dispatchKeyEvent(event)) {
@@ -2265,8 +2267,8 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         }
 
         // Hardware media keys drive the current page's video (short-press). Long-press play/pause
-        // was already claimed above for the cursor toggle, and in cursor mode fast-forward/rewind
-        // are claimed for wheel scroll; whatever falls through here seeks/plays the video.
+        // was already claimed above for the cursor toggle, and while the cursor is on
+        // fast-forward/rewind are claimed for wheel scroll; whatever falls through here seeks/plays the video.
         if (handleMediaKey(event)) {
             return true
         }
@@ -2541,8 +2543,8 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
     }
 
     /**
-     * Route analog joystick / gamepad-stick motion to the cursor while cursor mode is on.
-     * When cursor mode is off we defer to the default handling (return of super), which lets the
+     * Route analog joystick / gamepad-stick motion to the cursor while the cursor is on.
+     * When the cursor is off we defer to the default handling (return of super), which lets the
      * framework synthesize D-pad keys from joystick HAT motion for normal focus navigation.
      */
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
@@ -2679,7 +2681,7 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
                 return true
             }
             R.id.action_toggle_cursor -> {
-                toggleCursorMode()
+                toggleCursor()
                 return true
             }
             R.id.action_incognito -> {

@@ -44,7 +44,7 @@ PORT = 8899
 TIMEOUT_KEY = "pref_key_hide_tool_bar_timeout"
 FADE_KEY = "pref_key_cursor_fade_timeout"
 DEFAULT_VALUE = "0"
-DEFAULT_FADE = "3000"  # the code default; 0 = never fade (deterministic overlay checks)
+DEFAULT_FADE = "3"  # the code default (seconds); 0 = never fade (deterministic overlay checks)
 
 _server: ThreadingHTTPServer | None = None
 _reversed: dict = {}  # device.id -> device, for reverse-tunnel teardown at exit
@@ -171,19 +171,21 @@ def _set_cursor_fade(device, value: str) -> None:
     xml = device.read_prefs(path)
     if "<map" not in xml:
         return  # prefs not initialized yet; the code default applies
-    entry = f'<int name="{FADE_KEY}" value="{value}" />'
-    pattern = re.compile(rf'<int name="{re.escape(FADE_KEY)}" value="-?\d+" />')
+    entry = f'<float name="{FADE_KEY}" value="{value}" />'
+    # Match a float entry OR a legacy int entry (this pref used to be an int in ms) so a stale
+    # value is replaced, never duplicated.
+    pattern = re.compile(rf'<(int|float) name="{re.escape(FADE_KEY)}" value="-?\d+" />')
     xml = pattern.sub(entry, xml) if pattern.search(xml) else xml.replace("</map>", f"    {entry}\n</map>")
     device.write_prefs(path, xml)
 
 
 def _cursor_overlay(device) -> bool:
-    """The cursor overlay is present in the hierarchy only while cursor mode is on."""
+    """The cursor overlay is present in the hierarchy only while the cursor is on."""
     return device.find_node(":id/cursorOverlay") is not None
 
 
 def _cursor_toggle(device) -> None:
-    """Toggle cursor mode via the long-press play/pause hotkey (menu closed)."""
+    """Toggle the cursor via the long-press play/pause hotkey (menu closed)."""
     device.key_longpress(keys.MEDIA_PLAY_PAUSE, wait=1.2)
 
 
@@ -322,17 +324,17 @@ def test_toolbar_rehides_after_back_reshow(device, ctx: dict) -> None:
 
 
 def test_cursor_toolbar_rehides_after_back_reshow(device, ctx: dict) -> None:
-    """Cursor mode on the TV: back-reshow after an auto-hide must auto-hide again.
+    """Cursor on the TV: back-reshow after an auto-hide must auto-hide again.
 
     The cursor overlay is not focusable and the D-pad drives the cursor (not
     focus navigation), so the web view holds input focus the whole time - the
-    same conditions as test_toolbar_rehides_after_back_reshow, but with cursor
-    mode active, which is how the stuck case is hit in the wild.
+    same conditions as test_toolbar_rehides_after_back_reshow, but with the
+    cursor on, which is how the stuck case is hit in the wild.
     """
     if not device.is_leanback():
         ctx["notes"].append("cursor re-hide test skipped (device is not leanback)")
         return
-    # Fade disabled so the overlay (and thus cursor mode) is detectable at any
+    # Fade disabled so the overlay (and thus the cursor state) is detectable at any
     # moment and the toggle state can be asserted reliably.
     _set_cursor_fade(device, "0")
     _prepare(device, "timeout_target.html", "10")
@@ -340,17 +342,17 @@ def test_cursor_toolbar_rehides_after_back_reshow(device, ctx: dict) -> None:
         _wait_loaded(device, "loaded")
         _cursor_toggle(device)
         if not _cursor_overlay(device):
-            raise AssertionError("cursor mode could not be enabled for the test")
+            raise AssertionError("the cursor could not be enabled for the test")
         hidden1 = _wait_toolbar_hidden(device, 17.0)
-        assert hidden1 is not None, "no first auto-hide in cursor mode"
+        assert hidden1 is not None, "no first auto-hide with the cursor on"
         device.key(keys.BACK, wait=1.5)
         if device.field_text().strip().lower() != "loaded":
             raise AssertionError(f"tool bar did not re-appear after back (field={device.field_text()!r})")
         hidden2 = _wait_toolbar_hidden(device, 17.0)
         assert hidden2 is not None, (
-            "cursor mode: tool bar stayed visible after back re-showed it"
+            "cursor on: tool bar stayed visible after back re-showed it"
         )
-        assert hidden2 <= 13.0, f"cursor mode: tool bar took {hidden2:.2f} s to hide after the re-show"
+        assert hidden2 <= 13.0, f"cursor on: tool bar took {hidden2:.2f} s to hide after the re-show"
     finally:
         if _cursor_overlay(device):
             _cursor_toggle(device)
@@ -391,7 +393,7 @@ TEST_DESCRIPTIONS = {
         "auto-hides again - the countdown is re-armed at re-show"
     ),
     "test_cursor_toolbar_rehides_after_back_reshow": (
-        "In cursor mode (TV) the same back-reshow cycle auto-hides again - the "
+        "With the cursor on (TV) the same back-reshow cycle auto-hides again - the "
         "non-focusable cursor overlay must not prevent the re-arm"
     ),
     "test_toolbar_disabled_at_zero": (

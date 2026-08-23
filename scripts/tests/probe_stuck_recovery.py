@@ -95,7 +95,7 @@ def main() -> None:
     time.sleep(5)
     print(f"  3. settle +5s more        -> real tap {'WORKS' if _tap_ok(device, serial) else 'blocked'}")
 
-    # 4. toggle cursor mode off/on (re-parents overlay, churns views).
+    # 4. toggle the cursor off/on (re-parents overlay, churns views).
     cursor_tests._toggle(device)
     time.sleep(0.5)
     cursor_tests._toggle(device)

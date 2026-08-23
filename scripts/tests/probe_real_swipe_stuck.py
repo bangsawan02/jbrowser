@@ -7,7 +7,7 @@ This is the decisive experiment:
   - if it does NOT                        -> the wedge is specific to how our cursor controller
     synthesizes the touch (the fix belongs in CursorController).
 
-Cursor mode is OFF for the whole probe (no overlay, no controller touch involvement): only
+The cursor is OFF for the whole probe (no overlay, no controller touch involvement): only
 'in input swipe/tap' touch events and BACK keys are used. A screenshot is taken while a long
 press is held, to see whether the native WebView context menu shows on screen.
 
@@ -53,7 +53,7 @@ def main() -> None:
     device.settle()
 
     cursor_tests._load_page(device, "longpress_log.html")
-    # Ensure cursor mode is OFF (the loader leaves it off; assert anyway).
+    # Ensure the cursor is OFF (the loader leaves it off; assert anyway).
     if cursor_tests._overlay_present(device):
         cursor_tests._toggle(device)
 

@@ -25,7 +25,7 @@ The countdown is **armed at four deliberate points**:
    stays **stuck visible forever** in the most common flow: the timeout fires (the
    countdown is consumed by the hide), the user re-shows the bar with the back key or
    a scroll-up — neither of which moves input focus — and no focus-*gain* ever fires
-   again to arm a new countdown. This is the dominant path in cursor mode: the cursor
+   again to arm a new countdown. This is the dominant path with the cursor on: the cursor
    overlay is not focusable and the D-pad drives the cursor, so the web view holds
    input focus the whole time and BACK is the TV idiom for re-showing.
 
@@ -80,7 +80,7 @@ python scripts/tests/run.py --all --test toolbar                   # name filter
 | `test_toolbar_not_reset_by_interaction` | A D-pad press after load does **not** restart the countdown (it stays anchored at load, ~10 s after load, not ~10 s after the press). |
 | `test_toolbar_rearms_on_focus_gain` | After a first auto-hide, the tool bar is re-shown (back key), focus is moved to the search field and back onto the web view; that focus gain restarts the countdown (~10 s after the tap). |
 | `test_toolbar_rehides_after_back_reshow` | After an auto-hide, back re-shows the tool bar while the web view **keeps** focus (no focus gain) and it auto-hides *again* — the countdown is re-armed by the re-show itself. Regression guard for the “tool bar stuck after back” bug. |
-| `test_cursor_toolbar_rehides_after_back_reshow` | The same back-reshow cycle with cursor mode active (leanback only, cursor fade disabled so the overlay is detectable): the non-focusable cursor overlay must not prevent the re-arm. This is the exact case reported in the wild. |
+| `test_cursor_toolbar_rehides_after_back_reshow` | The same back-reshow cycle with the cursor on (leanback only, cursor fade disabled so the overlay is detectable): the non-focusable cursor overlay must not prevent the re-arm. This is the exact case reported in the wild. |
 | `test_toolbar_disabled_at_zero` | A timeout of 0 disables the feature (the tool bar never auto-hides). |
 
 **How the tests observe the tool bar.** Toolbar visibility is read over adb through the
@@ -141,18 +141,18 @@ failing test is not done*):
    disables). The temporary diagnostics were then removed and the code re-verified.
 
 A second bug in the same area was found later by a **real-site field test**
-(`scripts/tests/toolbar_field_test.py` — BBC/Wikipedia/YouTube, plain and cursor
-mode, with a 10 s timeout): the tool bar that the user **re-showed** (back key, or
+(`scripts/tests/toolbar_field_test.py` — BBC/Wikipedia/YouTube, plain and with the
+cursor on, with a 10 s timeout): the tool bar that the user **re-showed** (back key, or
 scroll-up) stayed stuck visible, because the re-show goes through `showActionBar()`
 and never re-arms the countdown the last auto-hide had consumed. This is the dominant
-case in cursor mode (the web view keeps focus, so no focus-*gain* edge follows the
+case with the cursor on (the web view keeps focus, so no focus-*gain* edge follows the
 re-show). It was reproduced deterministically on both devices with
 `test_toolbar_rehides_after_back_reshow` /
 `test_cursor_toolbar_rehides_after_back_reshow` (both failed pre-fix, pass post-fix),
 fixed by the `showActionBar()` re-arm (point 4 above), and the field test's
 phase 2 asserts the re-shown bar hides again.
 
-The field test's **phase 3** (cursor mode: drive the on-screen cursor onto a
+The field test's **phase 3** (cursor on: drive the on-screen cursor onto a
 YouTube right-rail recommendation and click it) needed a position *oracle* the
 app does not otherwise expose. Two dead ends were ruled out by a controlled
 probe (`scripts/tests/probe_cursor_triangulate.py`): a rapid D-pad burst over

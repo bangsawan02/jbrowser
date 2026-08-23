@@ -48,14 +48,14 @@ import timber.log.Timber
  * element is under the cursor (including nested scrollable panels) scrolls, like a real mouse wheel.
  *
  * ## Two independent ways to drive the cursor
- *  - **Cursor mode** ([enabled]): toggled with the hotkey / menu. While on, the **D-pad** moves the
+ *  - **Cursor on** ([enabled]): toggled with the hotkey / menu. While on, the **D-pad** moves the
  *    cursor and the select button clicks. This is the path for D-pad-only remotes and single-stick
  *    joysticks, where the D-pad would otherwise do focus navigation.
  *  - **Right analog stick** ([onGenericMotionEvent]): on a two-stick gamepad the right stick moves
- *    the cursor at any time, *without* toggling cursor mode — the left stick still scrolls and the
+ *    the cursor at any time, *without* toggling the cursor on — the left stick still scrolls and the
  *    D-pad still does focus navigation. The select button clicks whenever the cursor is [shown].
  *
- * The cursor fades out after [CursorSettings.fadeTimeoutMs] of no movement and fades back in on any
+ * The cursor fades out after [CursorSettings.fadeTimeoutSec] seconds of no movement and fades back in on any
  * movement.
  *
  * ## Movement is physical, not pixel-based
@@ -68,7 +68,7 @@ import timber.log.Timber
  *  - [targetProvider]: a way to fetch the view to dispatch into (the current WebView, or the
  *    fullscreen custom view while an HTML5 video is fullscreen), re-queried on every dispatch;
  *  - [settings]: [CursorSettings] for the hotkey / speed / acceleration / fade timeout;
- *  - [onModeChanged]: notified when cursor mode flips (the activity shows feedback and moves focus).
+ *  - [onCursorToggled]: notified when the cursor is toggled on/off (the activity shows feedback and moves focus).
  *
  * The activity forwards [dispatchKeyEvent] / [onGenericMotionEvent], adds (and, for fullscreen,
  * re-parents) the overlay view, and provides the target — nothing else. This keeps the component
@@ -76,7 +76,7 @@ import timber.log.Timber
  *
  * ## Toggle hotkey
  * A **long press** of [KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE] (held for [HOTKEY_LONG_PRESS_MS]) toggles
- * cursor mode; we detect it ourselves (media keys don't reliably deliver system long-press). A
+ * the cursor on/off; we detect it ourselves (media keys don't reliably deliver system long-press). A
  * **short** press is yielded back to the activity (returns false) so it can play/pause the page's
  * video. The activity forwards the key to us before it can reach a page's `MediaSession`.
  *
@@ -88,7 +88,8 @@ import timber.log.Timber
  * ## Context menu via the action key
  * While the cursor is on screen, a **deliberate long press** of the action key
  * ([KeyEvent.KEYCODE_DPAD_CENTER] / [KeyEvent.KEYCODE_ENTER] / [KeyEvent.KEYCODE_BUTTON_A] —
- * see [isConfirmKey], held for [ACTION_LONG_PRESS_MS]) performs a long press at the cursor and so
+ * see [isConfirmKey], held for [settings.actionHoldSec], user-configurable between 0.5 and
+ * 1 s) performs a long press at the cursor and so
  * opens the WebView's built-in context menu for the element under it (the same menu a touch long
  * press would open). A **short** press is the normal click at the cursor: the click is deferred to
  * the key UP so a held press can still be reclassified as a long press while it is held.
@@ -104,15 +105,15 @@ class CursorController(
     private val overlay: CursorView,
     private val targetProvider: () -> View?,
     private val settings: CursorSettings,
-    private val onModeChanged: (enabled: Boolean) -> Unit,
+    private val onCursorToggled: (enabled: Boolean) -> Unit,
 ) {
 
-    // Cursor mode: D-pad drives the cursor and select clicks. Independent of [shown].
+    // Cursor on: D-pad drives the cursor and select clicks. Independent of [shown].
     var enabled: Boolean = false
         private set
 
-    // Whether the cursor overlay is currently faded in (visible). Driven by cursor mode OR the
-    // right stick, and cleared by the fade-out timeout.
+    // Whether the cursor overlay is currently faded in (visible). Driven by the cursor being on OR
+    // the right stick, and cleared by the fade-out timeout.
     private var shown = false
 
     // Whether the cursor has ever been placed (so re-enabling doesn't recenter a right-stick cursor).
@@ -122,11 +123,11 @@ class CursorController(
     private var posX = 0f
     private var posY = 0f
 
-    // Active D-pad directions (each -1, 0 or +1). Only set while cursor mode is enabled.
+    // Active D-pad directions (each -1, 0 or +1). Only set while the cursor is on.
     private var keyDx = 0
     private var keyDy = 0
 
-    // Right-stick displacement after deadzone, -1..1. Drives the cursor regardless of cursor mode.
+    // Right-stick displacement after deadzone, -1..1. Drives the cursor regardless of whether the cursor is on.
     private var rsX = 0f
     private var rsY = 0f
 
@@ -153,13 +154,18 @@ class CursorController(
 
     // --- Context-menu (action-key long press) state --------------------------
     // A short press of the action key is a click at the cursor (fired on the key UP); a deliberate
-    // hold of [ACTION_LONG_PRESS_MS] opens the context menu. The DOWN arms the timer, the UP
+    // hold of [actionLongPressMs] (user setting, clamped to at least 500 ms) opens the context
+    // menu. The DOWN arms the timer, the UP
     // resolves the press: if the timer already fired for this press, the UP is consumed. The OS's
     // own long-press flag (raised after the ~400 ms system timeout) is deliberately NOT honored
     // here — a human "short click" is routinely held that long, and acting on it would open the
     // menu instead of clicking.
 
     private var actionLongPressHandled = false
+    // Deliberate-hold threshold for the context menu, from the user setting (seconds, clamped so
+    // it stays well past the ~400 ms system long-press flag — see the class KDoc), in ms.
+    private val actionLongPressMs: Long
+        get() = (settings.actionHoldSec.coerceAtLeast(settings.minActionHoldSec) * 1000f).toLong()
     private val actionLongPress = Runnable {
         actionLongPressHandled = true
         dispatchLongPress()
@@ -181,7 +187,7 @@ class CursorController(
      * Forward the activity's key events here first. Returns true when consumed.
      */
     fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // The toggle hotkey is a long press of play/pause, handled whether or not cursor mode is
+        // The toggle hotkey is a long press of play/pause, handled whether or not the cursor is
         // currently on. A short press is yielded back (returns false) so the activity can play/pause
         // the page's video.
         if (event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) {
@@ -201,7 +207,7 @@ class CursorController(
         }
 
         // The action key (select / DPAD center / ENTER / BUTTON_A) drives the primary interaction
-        // whenever the cursor is on screen — whether it got there via cursor mode or the right
+        // whenever the cursor is on screen — whether it got there via the hotkey toggle or the right
         // stick. A short press is a click at the cursor; a long press performs a long press there
         // and so opens the WebView's context menu for the element under the cursor. The click
         // fires on ACTION_UP, so a DOWN arms the long-press timer and the UP resolves the press.
@@ -212,12 +218,12 @@ class CursorController(
                     if (actionLongPressHandled) return true // already fired for this press
                     if (event.repeatCount == 0) {
                         handler.removeCallbacks(actionLongPress)
-                        handler.postDelayed(actionLongPress, ACTION_LONG_PRESS_MS)
+                        handler.postDelayed(actionLongPress, actionLongPressMs)
                     }
                     // Note: we intentionally do NOT react to event.isLongPress here — the OS
                     // raises it after the ~400 ms system timeout, and a human "short click" is
                     // routinely held that long (see the class KDoc). Only the deliberate
-                    // ACTION_LONG_PRESS_MS hold counts.
+                    // actionLongPressMs hold counts.
                 }
                 KeyEvent.ACTION_UP -> {
                     actionPressEvents += "u${event.keyCode}"
@@ -232,7 +238,7 @@ class CursorController(
             return true
         }
 
-        // The D-pad only drives the cursor while cursor mode is explicitly enabled; otherwise it
+        // The D-pad only drives the cursor while the cursor is explicitly on; otherwise it
         // must fall through to normal focus navigation.
         if (!enabled) return false
 
@@ -258,7 +264,7 @@ class CursorController(
 
     /**
      * Forward the activity's generic motion events here. The **right analog stick** drives the
-     * cursor at any time (no cursor-mode toggle needed) on two-stick gamepads. Always returns false
+     * cursor at any time (no cursor toggle needed) on two-stick gamepads. Always returns false
      * (non-consuming) so the left stick's scroll and D-pad focus navigation are left untouched — the
      * right stick's Z/RZ axes aren't used by either of those.
      */
@@ -281,7 +287,7 @@ class CursorController(
         return false
     }
 
-    /** Toggle cursor mode on/off. Safe to call from the menu or the hotkey. */
+    /** Toggle the cursor on/off. Safe to call from the menu or the hotkey. */
     fun toggle() {
         if (enabled) disable() else enable()
     }
@@ -294,7 +300,7 @@ class CursorController(
         overlay.visibility = View.VISIBLE
         overlay.post {
             // Center the cursor the first time it appears; keep its place if the right stick already
-            // positioned it, so toggling cursor mode on doesn't make it jump.
+            // positioned it, so toggling the cursor on doesn't make it jump.
             if (!positioned && overlay.maxX > 0f && overlay.maxY > 0f) {
                 posX = overlay.maxX / 2f
                 posY = overlay.maxY / 2f
@@ -305,7 +311,7 @@ class CursorController(
             wakeCursor()
             dispatchHover()
         }
-        onModeChanged(true)
+        onCursorToggled(true)
     }
 
     fun disable() {
@@ -318,7 +324,7 @@ class CursorController(
             hideCursor()
             stopLoop()
         }
-        onModeChanged(false)
+        onCursorToggled(false)
     }
 
     /** Detach lifecycle hooks; call from the activity's onDestroy. */
@@ -384,7 +390,7 @@ class CursorController(
             // so auto-repeat DOWNs don't double up with the loop.
             if (event.repeatCount == 0) {
                 val (pxCmX, pxCmY) = pxPerCm()
-                val stepCm = STEP_MIN_CM + (settings.speed.coerceIn(1, 100) / 100f) * (STEP_MAX_CM - STEP_MIN_CM)
+                val stepCm = STEP_MIN_CM + (settings.speed.coerceIn(1f, 100f) / 100f) * (STEP_MAX_CM - STEP_MIN_CM)
                 moveBy(ax * stepCm * pxCmX, ay * stepCm * pxCmY)
             }
             startLoop()
@@ -455,7 +461,7 @@ class CursorController(
         val maxY = boundsY
         if (maxX <= 0f || maxY <= 0f) return
 
-        // First movement (e.g. from the right stick before cursor mode was ever enabled) starts
+        // First movement (e.g. from the right stick before the cursor was ever toggled on) starts
         // from the center rather than the top-left corner.
         if (!positioned) {
             posX = maxX / 2f
@@ -721,8 +727,8 @@ class CursorController(
     private fun wakeCursor() {
         showCursor()
         handler.removeCallbacks(fadeRunnable)
-        val timeout = settings.fadeTimeoutMs
-        if (timeout > 0) handler.postDelayed(fadeRunnable, timeout.toLong())
+        val timeoutMs = (settings.fadeTimeoutSec * 1000f).toLong()
+        if (timeoutMs > 0) handler.postDelayed(fadeRunnable, timeoutMs)
     }
 
     private fun showCursor() {
@@ -762,12 +768,12 @@ class CursorController(
     }
 
     private fun baseSpeedCmPerSec(): Float {
-        val s = settings.speed.coerceIn(1, 100) / 100f
+        val s = settings.speed.coerceIn(1f, 100f) / 100f
         return SPEED_MIN_CM_S + s * (SPEED_MAX_CM_S - SPEED_MIN_CM_S)
     }
 
     private fun accelCmPerSec2(): Float =
-        (settings.acceleration.coerceIn(0, 100) / 100f) * ACCEL_MAX_CM_S2
+        (settings.acceleration.coerceIn(0f, 100f) / 100f) * ACCEL_MAX_CM_S2
 
     private fun applyDeadzone(v: Float): Float {
         if (abs(v) < JOYSTICK_DEADZONE) return 0f
@@ -782,10 +788,6 @@ class CursorController(
     companion object {
         val HOTKEY_LONG_PRESS_MS: Long =
             ViewConfiguration.getLongPressTimeout().toLong().coerceAtLeast(500L)
-        // Deliberate-hold threshold for the action-key context menu (ms). Deliberately well past
-        // the system long-press timeout (~400 ms) and the range a human "short click" is held in
-        // (up to ~700 ms), so hesitant clicks still click. See the class KDoc.
-        private const val ACTION_LONG_PRESS_MS = 1000L
         private const val CM_PER_INCH = 2.54f
         // Physical travel speed / acceleration the 1..100 settings map onto.
         private const val SPEED_MIN_CM_S = 1.5f

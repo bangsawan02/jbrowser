@@ -1,4 +1,4 @@
-"""Android TV cursor-mode UI tests, driven through the framework Device API.
+"""Android TV cursor UI tests, driven through the framework Device API.
 
 These verify the fulguris.cursor component end-to-end on a real device: the long-press hotkey
 toggle, D-pad movement, edge scrolling, mouse hover + click dispatch into the WebView, and the
@@ -101,12 +101,13 @@ def _ensure_reverse(device) -> None:
 
 # Cursor speed/acceleration/fade are user settings that persist on the device. Reset them to known
 # values once per device so movement/fade tests are deterministic regardless of what the user (or a
-# previous run) left them at.
+# previous run) left them at. Stored as floats (the x.SliderPreference persists floats); fade is in
+# seconds.
 _prefs_reset: set = set()  # device ids already reset
 _CURSOR_TEST_PREFS = {
     "pref_key_cursor_speed": 40,
     "pref_key_cursor_acceleration": 20,
-    "pref_key_cursor_fade_timeout": 3000,
+    "pref_key_cursor_fade_timeout": 3,
 }
 
 
@@ -125,14 +126,16 @@ def _reset_cursor_prefs(device) -> None:
     if "<map" not in xml:
         return  # prefs not initialized yet; the code defaults will apply
     for key, val in _CURSOR_TEST_PREFS.items():
-        entry = f'<int name="{key}" value="{val}" />'
-        pat = re.compile(rf'<int name="{re.escape(key)}" value="-?\d+" />')
+        entry = f'<float name="{key}" value="{val}" />'
+        # Match a float entry OR a legacy int entry (these prefs used to be ints in ms) so a stale
+        # value is replaced, never duplicated.
+        pat = re.compile(rf'<(int|float) name="{re.escape(key)}" value="-?\d+" />')
         xml = pat.sub(entry, xml) if pat.search(xml) else xml.replace("</map>", f"    {entry}\n</map>")
     device.write_prefs(_prefs_path(device.package), xml)
 
 
 def _load_page(device, page: str) -> None:
-    """Serve and open one of the assets pages, leaving cursor mode OFF."""
+    """Serve and open one of the assets pages, leaving the cursor OFF."""
     _ensure_server()
     _ensure_reverse(device)
     _reset_cursor_prefs(device)
@@ -153,12 +156,12 @@ def _load_target(device) -> None:
 
 
 def _overlay_present(device) -> bool:
-    """The cursor overlay view is only laid out (present in the hierarchy) while cursor mode is on."""
+    """The cursor overlay view is only laid out (present in the hierarchy) while the cursor is on."""
     return device.find_node(":id/cursorOverlay") is not None
 
 
 def _toggle(device) -> None:
-    """Toggle cursor mode via the long-press hotkey (play/pause) and let the fade settle."""
+    """Toggle the cursor via the long-press hotkey (play/pause) and let the fade settle."""
     device.key_longpress(keys.MEDIA_PLAY_PAUSE, wait=1.0)
 
 
@@ -189,20 +192,20 @@ def test_cursor_toggle_hotkey_shows_and_hides_overlay(device, ctx: dict) -> None
     _load_target(device)
     assert not _overlay_present(device), "cursor overlay should be hidden before enabling"
     _toggle(device)
-    assert _overlay_present(device), "long-press hotkey should turn cursor mode on (overlay shown)"
+    assert _overlay_present(device), "long-press hotkey should turn the cursor on (overlay shown)"
     _toggle(device)
-    assert not _overlay_present(device), "long-press hotkey should turn cursor mode off (overlay hidden)"
+    assert not _overlay_present(device), "long-press hotkey should turn the cursor off (overlay hidden)"
 
 
 def test_cursor_toggle_exit_focuses_menu_button(device, ctx: dict) -> None:
     _load_target(device)
     _toggle(device)
-    assert _overlay_present(device), "cursor mode should be on"
+    assert _overlay_present(device), "the cursor should be on"
     _toggle(device)
-    assert not _overlay_present(device), "cursor mode should be off"
-    # Exiting cursor mode moves focus to the toolbar more/menu button for predictable D-pad nav.
+    assert not _overlay_present(device), "the cursor should be off"
+    # Turning the cursor off moves focus to the toolbar more/menu button for predictable D-pad nav.
     assert _focused_resource_id(device).endswith(":id/button_more"), \
-        f"exiting cursor mode should focus the menu button, focus was '{_focused_resource_id(device)}'"
+        f"turning the cursor off should focus the menu button, focus was '{_focused_resource_id(device)}'"
 
 
 # ===========================================================================
@@ -258,7 +261,7 @@ def test_cursor_movement_edge_scrolls_page(device, ctx: dict) -> None:
 
 def test_cursor_fade_hides_then_wakes(device, ctx: dict) -> None:
     _load_target(device)
-    _toggle(device)  # cursor mode on; fade timeout was reset to 3000ms
+    _toggle(device)  # cursor on; fade timeout was reset to 3000ms
     assert _overlay_present(device), "cursor should be visible right after enabling"
     time.sleep(4.5)  # longer than the fade timeout + fade animation
     assert not _overlay_present(device), "cursor should fade out after the inactivity timeout"
@@ -344,13 +347,13 @@ def test_cursor_menu_item_toggles_mode(device, ctx: dict) -> None:
     if not device.is_leanback():
         ctx["notes"].append("cursor menu toggle test skipped (device is not leanback)")
         return
-    assert not _overlay_present(device), "cursor mode should start off"
+    assert not _overlay_present(device), "the cursor should start off"
     _open_main_menu(device)
     item = device.find_node(":id/menuItemCursor")
     assert item and item.bounds, "Cursor menu item not found in the main menu"
     x1, y1, x2, y2 = item.bounds
     device.tap((x1 + x2) // 2, (y1 + y2) // 2, wait=1.0)
-    assert _overlay_present(device), "tapping the Cursor menu item should turn cursor mode on"
+    assert _overlay_present(device), "tapping the Cursor menu item should turn the cursor on"
     _toggle(device)  # leave it off
 
 
@@ -403,18 +406,18 @@ def test_cursor_wheel_ff_rewind_scrolls(device, ctx: dict) -> None:
     # cursor_target.html is 220vh and reports window.scrollY as 'sy<n>' on scroll.
     _load_target(device)
     _toggle(device)  # cursor on; centered, page at the top (sy=0)
-    # In cursor mode rewind is a mouse wheel scroll DOWN at the cursor.
+    # With the cursor on, rewind is a mouse wheel scroll DOWN at the cursor.
     device.key(keys.MEDIA_REWIND, wait=0.9)
     t1 = _title(device)
     m1 = re.fullmatch(r"sy(\d+)", t1.strip())
-    assert m1 and int(m1.group(1)) > 0, f"rewind in cursor mode should wheel-scroll down, title was '{t1}'"
+    assert m1 and int(m1.group(1)) > 0, f"rewind with the cursor on should wheel-scroll down, title was '{t1}'"
     down = int(m1.group(1))
     # Fast-forward is a mouse wheel scroll UP.
     device.key(keys.MEDIA_FAST_FORWARD, wait=0.9)
     device.key(keys.MEDIA_FAST_FORWARD, wait=0.9)
     t2 = _title(device)
     m2 = re.fullmatch(r"sy(\d+)", t2.strip())
-    assert m2 and int(m2.group(1)) < down, f"fast-forward in cursor mode should wheel-scroll back up, was '{t1}' now '{t2}'"
+    assert m2 and int(m2.group(1)) < down, f"fast-forward with the cursor on should wheel-scroll back up, was '{t1}' now '{t2}'"
     _toggle(device)
 
 
@@ -483,7 +486,7 @@ def test_cursor_context_menu_action_long_press(device, ctx: dict) -> None:
     # Do NOT assert _overlay_present() here: the cursor fades out after the 3 s inactivity
     # timeout (overlay becomes GONE and drops out of the uiautomator dump), and each dump
     # itself takes ~2-3 s — so the check races the fade and flakes. The action-key branch is
-    # guarded by `enabled || shown` and dispatchLongPress() wakes the cursor, so cursor mode
+    # guarded by `enabled || shown` and dispatchLongPress() wakes the cursor, so the cursor
     # is on even while the overlay is faded; the context menu below is the real signal.
     device.key_hold(keys.DPAD_CENTER, 1500)  # a deliberate hold (past the 1 s action-key threshold)
     nodes = device.nodes()
@@ -568,7 +571,7 @@ ALL_TESTS = [t for group in FEATURE_GROUPS.values() for t in group]
 
 TEST_DESCRIPTIONS = {
     "test_cursor_toggle_hotkey_shows_and_hides_overlay": "Long-press play/pause toggles the cursor overlay on and off",
-    "test_cursor_toggle_exit_focuses_menu_button": "Exiting cursor mode moves focus to the toolbar menu button",
+    "test_cursor_toggle_exit_focuses_menu_button": "Turning the cursor off moves focus to the toolbar menu button",
     "test_cursor_movement_dpad_right_moves_right": "D-pad right moves the cursor right (click X increases)",
     "test_cursor_movement_dpad_down_moves_down": "D-pad down moves the cursor down (click Y increases)",
     "test_cursor_movement_edge_scrolls_page": "Pushing past the bottom edge scrolls the page",
@@ -578,10 +581,10 @@ TEST_DESCRIPTIONS = {
     "test_cursor_click_drag_target_seeks": "A cursor click seeks a scrub bar via mousedown(mouse) or touch drag, like YouTube's timeline",
     "test_cursor_click_hesitant_press_still_clicks": "A realistically held (~600 ms) select press still clicks — only a deliberate ~1 s hold opens the context menu",
     "test_cursor_menu_item_visible_on_leanback": "The Cursor main-menu item is shown on Android TV",
-    "test_cursor_menu_item_toggles_mode": "Tapping the Cursor menu item turns cursor mode on",
+    "test_cursor_menu_item_toggles_mode": "Tapping the Cursor menu item turns the cursor on",
     "test_cursor_fullscreen_click_reaches_custom_view": "In HTML5 fullscreen the cursor is visible and its click reaches the fullscreen view",
     "test_cursor_media_play_pause": "The media play/pause key pauses and resumes the page video",
-    "test_cursor_wheel_ff_rewind_scrolls": "In cursor mode fast-forward/rewind wheel-scroll the page up/down at the cursor",
+    "test_cursor_wheel_ff_rewind_scrolls": "With the cursor on, fast-forward/rewind wheel-scroll the page up/down at the cursor",
     "test_cursor_youtube_scrubber_seek": "A cursor click seeks a YouTube-style auto-hiding scrubber (hover keeps controls alive, click seeks)",
     "test_cursor_youtube_scrubber_seek_after_idle": "Click seeks even after controls auto-hid (dispatchHover+delay re-shows them before BUTTON_PRESS lands) (leanback only)",
     "test_cursor_context_menu_action_long_press": "Long-press the action key (select / DPAD center) opens the WebView context menu for the element under the cursor",

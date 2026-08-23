@@ -416,9 +416,9 @@ def key(serial: str, keycode: int, wait: float = 0.5) -> None:
 def key_longpress(serial: str, keycode: int, wait: float = 0.8) -> None:
     """Send a system long-press key event (sets FLAG_LONG_PRESS).
 
-    Used to drive the cursor-mode toggle hotkey (KEYCODE_MEDIA_FAST_FORWARD) over adb.
+    Used to drive the cursor toggle hotkey (KEYCODE_MEDIA_FAST_FORWARD) over adb.
     The cursor controller honors FLAG_LONG_PRESS as a secondary trigger alongside its own
-    hold timer, so this reliably flips cursor mode.
+    hold timer, so this reliably flips the cursor on/off.
 
     Note: the key is held for the *system* long-press timeout only (~400-500 ms), which is
     inside the "hesitant click" territory — use :func:`key_hold` for a deliberate, arbitrary

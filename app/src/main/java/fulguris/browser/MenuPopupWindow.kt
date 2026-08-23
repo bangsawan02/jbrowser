@@ -389,9 +389,9 @@ class MenuPopupWindow : PopupWindow {
                     iBinding.menuItemPip.isVisible = false
                 }
 
-                // Cursor mode only makes sense on Android TV or when a gamepad / joystick / D-pad
+                // The cursor only makes sense on Android TV or when a gamepad / joystick / D-pad
                 // device is connected. Availability is queried live from the activity.
-                if (!(contentView.context as WebBrowserActivity).isCursorModeAvailable()) {
+                if (!(contentView.context as WebBrowserActivity).isCursorAvailable()) {
                     iBinding.menuItemCursor.isVisible = false
                 }
             }
@@ -538,8 +538,8 @@ class MenuPopupWindow : PopupWindow {
                 !abpUserRules.isAllowed(Uri.parse(url))
             } ?: false
 
-            // Reflect current cursor mode state
-            iBinding.menuItemCursor.isChecked = (contentView.context as? WebBrowserActivity)?.isCursorModeEnabled() ?: false
+            // Reflect current cursor state (on / off)
+            iBinding.menuItemCursor.isChecked = (contentView.context as? WebBrowserActivity)?.isCursorOn() ?: false
 
             // Update Sessions menu item with current session name
             val sessionName = (contentView.context as? WebBrowserActivity)?.sessionsManager?.currentSessionName() ?: ""
