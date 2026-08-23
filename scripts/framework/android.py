@@ -198,6 +198,22 @@ class AndroidDevice(Device):
         """Read a file from the app sandbox via ``run-as`` (e.g. a shared-prefs XML)."""
         return self.transport.shell(["shell", "run-as", self._package, "cat", rel_path])
 
+    def input_devices(self) -> list[tuple[str, str]]:
+        """The device input nodes as ``[(node_path, name), ...]``."""
+        return adb.input_devices(self.serial)
+
+    def find_input_node(self, name: str) -> str | None:
+        """The input node of the first device whose name contains ``name``."""
+        return adb.find_input_node(self.serial, name)
+
+    def inject_hat_press(self, node: str, x: int, y: int = 0, wait: float = 0.8) -> None:
+        """Push a gamepad D-pad hat (ABS_HAT0X/0Y) one step — a D-pad key from that device."""
+        adb.inject_hat_press(self.serial, node, x, y, wait)
+
+    def inject_hat_hold(self, node: str, x: int, y: int, hold: float, wait: float = 0.5) -> None:
+        """Hold a gamepad D-pad hat pushed for ``hold`` seconds (virtual D-pad key held)."""
+        adb.inject_hat_hold(self.serial, node, x, y, hold, wait)
+
     def write_prefs(self, rel_path: str, content: str) -> None:
         """Write ``content`` into the app sandbox at ``rel_path`` via a pushed temp file."""
         import subprocess

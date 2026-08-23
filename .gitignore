@@ -59,6 +59,9 @@ fastlane/screenshots
 fastlane/test_output
 fastlane/README.md
 
+# Local scratch folder (agent temp files etc.)
+/.temp/
+
 # Google Play API keys - NEVER COMMIT THESE!
 *-play-store.json
 *-playstore.json

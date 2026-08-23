@@ -173,9 +173,16 @@ def screen_size(serial: str) -> tuple[int, int]:
 
 
 def foreground_package(serial: str) -> str | None:
-    """Package of the top resumed (foreground) activity, if any."""
+    """Package of the top resumed (foreground) activity, if any.
+
+    Handles both dumpsys formats: newer Android prints ``mResumedActivity=``
+    while Android 11 (e.g. the SHIELD TV) prints ``mResumedActivity:`` — the
+    separator is ``=`` or ``:`` (the colon form must not be confused with the
+    ``ActivityRecord{... u0 pkg/act`` token, which is why the package is
+    captured from after the ``u0`` user marker).
+    """
     out = _adb(serial, ["shell", "dumpsys", "activity", "activities"])
-    m = re.search(r"(?:topResumedActivity|mResumedActivity)=.*?([\w.]+)/", out)
+    m = re.search(r"(?:topResumedActivity|mResumedActivity)[=:].*?([\w.]+)/", out)
     return m.group(1) if m else None
 
 
@@ -496,6 +503,72 @@ def close_tabs(serial: str, count: int, wait: float = 0.9) -> None:
     """
     for _ in range(count):
         key_combination(serial, KEY_CTRL_LEFT, KEY_CTRL_W, wait=wait)
+
+# --- Raw input-device injection --------------------------------------------
+# For driving input that `input keyevent` cannot: a gamepad's virtual D-pad (an
+# ABS_HAT axis) or analog sticks. `getevent -pl` lists the input nodes and their
+# capabilities; `sendevent` injects raw events into one.
+
+EV_KEY, EV_ABS, EV_SYN = 0x01, 0x03, 0x01
+SYN_REPORT = 0x00
+ABS_HAT0X, ABS_HAT0Y = 0x16, 0x17
+
+
+def input_devices(serial: str) -> list[tuple[str, str]]:
+    """The device input nodes as ``[(node_path, name), ...]`` (from ``getevent -pl``)."""
+    out = _adb(serial, ["shell", "getevent", "-pl"], timeout=30)
+    devices: list[tuple[str, str]] = []
+    node: str | None = None
+    for line in out.splitlines():
+        s = line.strip()
+        if s.startswith("add device"):
+            node = s.rsplit(":", 1)[1].strip()
+        elif node and s.startswith("name:"):
+            devices.append((node, s.split(":", 1)[1].strip().strip('"')))
+            node = None
+    return devices
+
+
+def find_input_node(serial: str, name: str) -> str | None:
+    """The input node (``/dev/input/eventN``) of the first device whose name contains ``name``."""
+    for node, dev in input_devices(serial):
+        if name.lower() in dev.lower():
+            return node
+    return None
+
+
+def _inject_hat(serial: str, node: str, x: int, y: int) -> None:
+    """Set the hat axis to (x, y) in one shell round trip."""
+    def ev(t: int, code: int, val: int) -> str:
+        return f"sendevent {node} {t:04x} {code:04x} {val & 0xffff:04x}"
+    _adb(serial, ["shell", " && ".join(
+        [ev(EV_ABS, ABS_HAT0X, x), ev(EV_ABS, ABS_HAT0Y, y), ev(EV_SYN, SYN_REPORT, 0)]
+    )], timeout=20)
+
+
+def inject_hat_press(serial: str, node: str, x: int, y: int = 0, wait: float = 0.8) -> None:
+    """Push a gamepad D-pad hat (ABS_HAT0X/0Y, -1..1) one step and release it.
+
+    The input reader turns the hat axis into a virtual D-pad key press (one DOWN/UP
+    pair, no auto-repeat), so this delivers a D-pad key event *from that device* —
+    something `input keyevent` cannot do. One shell round trip per half.
+    """
+    _inject_hat(serial, node, x, y)
+    time.sleep(0.15)  # let the down propagate, then release
+    _inject_hat(serial, node, 0, 0)
+    time.sleep(wait)
+
+
+def inject_hat_hold(serial: str, node: str, x: int, y: int, hold: float, wait: float = 0.5) -> None:
+    """Hold a gamepad D-pad hat pushed for ``hold`` seconds, then release it.
+
+    The input reader keeps the virtual D-pad key DOWN for the whole hold (no
+    auto-repeat), which is exactly what the app's continuous movement expects.
+    """
+    _inject_hat(serial, node, x, y)
+    time.sleep(hold)
+    _inject_hat(serial, node, 0, 0)
+    time.sleep(wait)
 
 
 def open_tab_switcher(serial: str, wait: float = 1.0) -> bool:

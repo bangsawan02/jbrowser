@@ -1,16 +1,16 @@
-# Fulguris UI test run — Pi Compute Module 5 Rev 1.0 · landscape-0-sw584
-timestamp: '2026-08-23T17:21:31+00:00'
+# Fulguris UI test run — SHIELD Android TV · landscape-0-sw1080
+timestamp: '2026-08-23T17:59:11+00:00'
 device:
-  serial: 192.168.178.67:5555
-  model: Pi Compute Module 5 Rev 1.0
-  brand: Raspberry
-  product_name: Raspberry Pi 5 TV box
-  android: '16'
+  serial: 192.168.178.37:5555
+  model: SHIELD Android TV
+  brand: Nvidia
+  product_name: SHIELD Android TV
+  android: '11'
 config:
-  id: landscape-0-sw584
+  id: landscape-0-sw1080
   orientation: landscape
   rotation: 0
-  smallest_width_dp: 584
+  smallest_width_dp: 1080
 package: net.slions.fulguris.full.download.debug
 options:
   restart: false
@@ -22,17 +22,17 @@ summary:
   passed: 4
   failed: 0
   total: 4
-  duration_s: 109.0
+  duration_s: 210.6
 tests:
 - name: test_cursor_movement_dpad_right_moves_right
   status: pass
-  duration_s: 28.5
+  duration_s: 36.7
 - name: test_cursor_movement_dpad_down_moves_down
   status: pass
-  duration_s: 32.5
+  duration_s: 33.0
 - name: test_cursor_movement_edge_scrolls_page
   status: pass
-  duration_s: 43.9
+  duration_s: 134.5
 - name: test_cursor_movement_gamepad_dpad_yields_to_focus_nav
   status: pass
   duration_s: 1.3

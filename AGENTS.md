@@ -276,7 +276,11 @@ Key facts a future agent needs:
   partner there), so a 600 ms "hesitant click" and a 1500 ms deliberate hold are both
   reproducible across devices.
 - **Two ways to drive it.** *Cursor on* (`enabled`, toggled by the hotkey/menu) lets the
-  **D-pad** move the cursor and the select button click. Independently, on a two-stick gamepad the
+  **D-pad** move the cursor and the select button click — *except* a directional key that comes
+  from a **two-stick gamepad** is always yielded back to normal focus navigation (the gamepad's
+  right stick is the cursor's intended driver there, so its D-pad keeps its normal role even with
+  the cursor on; `hasRightStick(event.device)` gates it, so D-pad keys from a stick-less remote —
+  or adb's virtual keyboard — still drive the cursor). Independently, on a two-stick gamepad the
   **right stick** (`AXIS_Z`/`AXIS_RZ`, validated as a *centered* axis via motion-range `min < 0` so
   triggers don't count) moves the cursor **at any time without toggling** — `onGenericMotionEvent`
   returns **false** (non-consuming) so the left stick's scroll and D-pad focus nav are untouched
@@ -409,6 +413,9 @@ proves the fix. A bug without a failing test is not reproducible and not done.
 - **Never commit without explicit user approval.** Staging is fine; committing is not.
 - Windows PowerShell: quote paths that contain spaces; adb output must be
   decoded as UTF-8 (handled by `scripts/tools/adb.py` — don't bypass it).
+- **Scratch files go in the repo-local `.temp/` folder, never the system temp
+  dir** (writing to `%TEMP%` needs an approval prompt in this environment).
+  `.temp/` is gitignored.
 - TV gotchas baked into the tooling: the leanback IME is fullscreen (field text
   during edit may read the IME hint), and `dumpsys window windows` is the
   reliable way to detect the autocomplete popup.

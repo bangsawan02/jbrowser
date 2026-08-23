@@ -50,10 +50,14 @@ import timber.log.Timber
  * ## Two independent ways to drive the cursor
  *  - **Cursor on** ([enabled]): toggled with the hotkey / menu. While on, the **D-pad** moves the
  *    cursor and the select button clicks. This is the path for D-pad-only remotes and single-stick
- *    joysticks, where the D-pad would otherwise do focus navigation.
+ *    joysticks, where the D-pad would otherwise do focus navigation. One exception: a D-pad key
+ *    that comes from a *two-stick* gamepad is always yielded back to focus navigation — on such a
+ *    device the right stick (below) is the cursor's intended driver, so the D-pad keeps its normal
+ *    role even with the cursor on.
  *  - **Right analog stick** ([onGenericMotionEvent]): on a two-stick gamepad the right stick moves
- *    the cursor at any time, *without* toggling the cursor on — the left stick still scrolls and the
- *    D-pad still does focus navigation. The select button clicks whenever the cursor is [shown].
+ *    the cursor at any time, *without* toggling the cursor on — the left stick still scrolls and
+ *    the D-pad still does focus navigation (including while the cursor is on). The select button
+ *    clicks whenever the cursor is [shown].
  *
  * The cursor fades out after [CursorSettings.fadeTimeoutSec] seconds of no movement and fades back in on any
  * movement.
@@ -247,6 +251,16 @@ class CursorController(
             KeyEvent.KEYCODE_DPAD_DOWN,
             KeyEvent.KEYCODE_DPAD_LEFT,
             KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                // A directional key coming from a *two-stick* gamepad is yielded back even with
+                // the cursor on: on such a device the right analog stick is the cursor's
+                // intended driver (it works at any time, cursor on or off), so the D-pad keeps
+                // its normal role (focus navigation) rather than also steering the cursor.
+                // D-pad keys from a D-pad-only remote — or from adb's virtual keyboard, which
+                // has no right stick — still drive the cursor.
+                if (hasRightStick(event.device)) {
+                    Timber.d("Cursor: yielding D-pad ${event.keyCode} from a two-stick gamepad")
+                    return false
+                }
                 handleDirectionKey(event)
                 true
             }

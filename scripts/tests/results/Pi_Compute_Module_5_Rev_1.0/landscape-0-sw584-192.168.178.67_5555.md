@@ -1,13 +1,15 @@
 # Test run — Pi Compute Module 5 Rev 1.0 · landscape-0-sw584
 
-- **When:** 2026-08-23T00:39:41+00:00
+- **When:** 2026-08-23T17:21:31+00:00
 - **Device:** Raspberry Pi 5 TV box (Raspberry Pi Compute Module 5 Rev 1.0) — Android 16 (serial `192.168.178.67:5555`)
 - **Config:** landscape, rotation 0°, smallest width 584dp
 - **Package:** `net.slions.fulguris.full.download.debug`
-- **Options:** restart=False, keep_tabs=False, orientation=default, filter=repeated_long_press
-- **Result:** 0/1 passed in 32.2s
+- **Options:** restart=False, keep_tabs=False, orientation=default, filter=all
+- **Result:** 4/4 passed in 109.0s
 
 | Test | Description | Result | Duration |
 |---|---|---|---|
-| `test_cursor_context_menu_repeated_long_press_touch_stays_clean` | Repeated long presses (same page) each deliver a fresh touch — the synthetic long press must not leave the WebView's touch state stuck | ❌ fail | 31.2s |
-| | _each of the 3 long presses should deliver a fresh touch (pointerdown) to the page, but only 2 did — the WebView's touch state is stuck (UP-after-cancel); log='pd0 ts3 pc537 ctx538 tc562 pd3179 ts3180 pc3682 ctx3682 tc3692 ctx6890'_ | | |
+| `test_cursor_movement_dpad_right_moves_right` | D-pad right moves the cursor right (click X increases) | ✅ pass | 28.5s |
+| `test_cursor_movement_dpad_down_moves_down` | D-pad down moves the cursor down (click Y increases) | ✅ pass | 32.5s |
+| `test_cursor_movement_edge_scrolls_page` | Pushing past the bottom edge scrolls the page | ✅ pass | 43.9s |
+| `test_cursor_movement_gamepad_dpad_yields_to_focus_nav` | With the cursor on, a two-stick gamepad's D-pad is yielded to focus navigation (the right stick drives the cursor) while the stick-less D-pad still moves it | ✅ pass | 1.3s |

@@ -254,6 +254,51 @@ def test_cursor_movement_edge_scrolls_page(device, ctx: dict) -> None:
     _toggle(device)
 
 
+def test_cursor_movement_gamepad_dpad_yields_to_focus_nav(device, ctx: dict) -> None:
+    # A two-stick gamepad's right stick is the cursor's intended driver (it works at any time),
+    # so the gamepad's own D-pad must NOT steer the cursor even while the cursor is on — it keeps
+    # its normal focus-navigation role. The D-pad of a stick-less remote / adb's virtual keyboard
+    # must still drive the cursor. The hat is pushed via sendevent on the gamepad's input node so
+    # the D-pad event carries the gamepad as its source device (the input reader synthesizes the
+    # virtual D-pad key from the ABS_HAT axis).
+    node = None
+    for name in ("xbox", "gamepad", "dualshock", "dualsense", "steam controller", "nintendo"):
+        node = device.find_input_node(name)
+        if node:
+            break
+    if not node:
+        ctx["notes"].append("no gamepad connected — gamepad D-pad yield test skipped")
+        return
+    _load_target(device)
+    # Control 1 (cursor OFF): the hat must produce input that reaches the app — focus moves away
+    # from the web view. If it doesn't, the hat produces no D-pad input at all on this device and
+    # the yield is not verifiable here (skip rather than fail).
+    focus0 = _focused_resource_id(device)
+    device.inject_hat_press(node, 1, 0)  # hat right
+    device.inject_hat_press(node, 0, 1)  # hat down
+    focus1 = _focused_resource_id(device)
+    if focus1 == focus0:
+        ctx["notes"].append(
+            f"hat press changed no focus on this device ({node}) — gamepad D-pad yield not verifiable here")
+        return
+    # The actual check (cursor ON): a held gamepad D-pad DOWN must not drive the cursor to the
+    # bottom edge — no page scroll. It is yielded to focus navigation instead.
+    _toggle(device)
+    device.inject_hat_hold(node, 0, 1, hold=3.5)
+    title = _title(device)
+    assert not re.fullmatch(r"sy\d+", title.strip()), \
+        f"the gamepad D-pad must not move the cursor (the right stick drives it), but the page scrolled: '{title}'"
+    # Control 2: the stick-less D-pad (adb's virtual keyboard) must still drive the cursor with
+    # the cursor on — driving to the bottom edge scrolls the page.
+    for _ in range(140):
+        device.key(keys.DPAD_DOWN, wait=0.03)
+    title = _title(device)
+    m = re.fullmatch(r"sy(\d+)", title.strip())
+    assert m and int(m.group(1)) > 0, \
+        f"the stick-less D-pad must still move the cursor while the cursor is on, title was '{title}'"
+    _toggle(device)
+
+
 # ===========================================================================
 # Feature: cursor fade
 # ===========================================================================
@@ -534,6 +579,7 @@ FEATURE_GROUPS = {
         test_cursor_movement_dpad_right_moves_right,
         test_cursor_movement_dpad_down_moves_down,
         test_cursor_movement_edge_scrolls_page,
+        test_cursor_movement_gamepad_dpad_yields_to_focus_nav,
     ],
     "cursor-fade": [
         test_cursor_fade_hides_then_wakes,
@@ -575,6 +621,7 @@ TEST_DESCRIPTIONS = {
     "test_cursor_movement_dpad_right_moves_right": "D-pad right moves the cursor right (click X increases)",
     "test_cursor_movement_dpad_down_moves_down": "D-pad down moves the cursor down (click Y increases)",
     "test_cursor_movement_edge_scrolls_page": "Pushing past the bottom edge scrolls the page",
+    "test_cursor_movement_gamepad_dpad_yields_to_focus_nav": "With the cursor on, a two-stick gamepad's D-pad is yielded to focus navigation (the right stick drives the cursor) while the stick-less D-pad still moves it",
     "test_cursor_fade_hides_then_wakes": "The cursor fades out after the inactivity timeout and wakes on movement",
     "test_cursor_click_hover_fires_mouseover": "Enabling the cursor fires a mouse hover on the page",
     "test_cursor_click_activates_under_cursor": "Select press dispatches a click the page receives at the cursor",
