@@ -166,9 +166,20 @@ def is_leanback(serial: str) -> bool:
 
 
 def screen_size(serial: str) -> tuple[int, int]:
-    """Physical screen size in pixels, parsed from `wm size` (falls back to a sane default)."""
+    """Logical (app) screen size in pixels, parsed from `wm size`.
+
+    `input tap` / `keyevent` use LOGICAL coordinates, which is the *override* size when one is
+    set (e.g. a 4K panel driven at 1080p: `Physical size: 3840x2160` / `Override size: 1920x1080`)
+    and the *physical* size otherwise. The physical line is printed first, so taking the first
+    ``NxN`` would tap the wrong place on such a device (a "center" tap lands off-page). Prefer an
+    override when present, then the physical size, then any size. Falls back to a sane default.
+    """
     out = _adb(serial, ["shell", "wm", "size"])
-    m = re.search(r"(\d+)x(\d+)", out)
+    m = re.search(r"Override size:\s*(\d+)x(\d+)", out)
+    if not m:
+        m = re.search(r"Physical size:\s*(\d+)x(\d+)", out)
+    if not m:
+        m = re.search(r"(\d+)x(\d+)", out)
     return (int(m.group(1)), int(m.group(2))) if m else (1920, 1080)
 
 

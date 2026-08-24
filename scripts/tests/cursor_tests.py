@@ -104,10 +104,15 @@ def _ensure_reverse(device) -> None:
 # previous run) left them at. Stored as floats (the x.SliderPreference persists floats); fade is in
 # seconds.
 _prefs_reset: set = set()  # device ids already reset
+# action_hold is reset too: the hesitant-press test needs it > 0.6 s (so a 600 ms press is a
+# click, not the context-menu long press) while the context-menu tests hold 1.5 s (still a long
+# press). 1.0 s (the default) satisfies both; a leftover 0.5 s would make the hesitant press a
+# long press. Stored as a float (the x.SliderPreference persists floats).
 _CURSOR_TEST_PREFS = {
     "pref_key_cursor_speed": 40,
     "pref_key_cursor_acceleration": 20,
     "pref_key_cursor_fade_timeout": 3,
+    "pref_key_cursor_action_hold": 1,
 }
 
 
@@ -115,23 +120,50 @@ def _prefs_path(package: str) -> str:
     return f"shared_prefs/{package}_preferences.xml"
 
 
+def _config_prefs_path(package: str, orientation: str) -> str:
+    """The configuration-scoped prefs file (Settings keeps per-orientation values here)."""
+    return f"shared_prefs/{package}_preferences_{orientation}.xml"
+
+
+def _set_float_pref(xml: str, key: str, value: str) -> str:
+    """Replace (or append) a single float/int pref entry in a prefs XML string.
+
+    Matches a float entry (integer OR decimal, e.g. 40 or 40.0) OR a legacy int entry so a stale
+    value is replaced in place, never duplicated.
+    """
+    entry = f'<float name="{key}" value="{value}" />'
+    pat = re.compile(rf'<(int|float) name="{re.escape(key)}" value="-?\d+(?:\.\d+)?" />')
+    return pat.sub(entry, xml) if pat.search(xml) else xml.replace("</map>", f"    {entry}\n</map>")
+
+
 def _reset_cursor_prefs(device) -> None:
-    """Force the cursor speed/accel/fade prefs to known test values (host-side rewrite of the XML)."""
+    """Force the cursor prefs to known test values (host-side rewrite of the prefs XML).
+
+    Also disables the "Hide tool bar after" auto-hide timeout in the *configuration-scoped* prefs
+    file: every cursor test reads page state from the toolbar label, so a persisted hide timeout
+    (e.g. 5 s, as was left on the SHIELD) would auto-hide the toolbar ~5 s after every page load
+    and make every test read an empty label. The toolbar-hide suite self-manages its own timeout
+    per test, so resetting it to 0 here cannot collide. The app is stopped for both rewrites so it
+    cannot overwrite the files on exit.
+    """
     if device.id in _prefs_reset:
         return
     _prefs_reset.add(device.id)
-    # App must be stopped so it doesn't overwrite the file on exit and reloads our values next launch.
+    # App must be stopped so it doesn't overwrite the files on exit and reloads our values next launch.
     device.force_stop()
     xml = device.read_prefs(_prefs_path(device.package))
-    if "<map" not in xml:
-        return  # prefs not initialized yet; the code defaults will apply
-    for key, val in _CURSOR_TEST_PREFS.items():
-        entry = f'<float name="{key}" value="{val}" />'
-        # Match a float entry OR a legacy int entry (these prefs used to be ints in ms) so a stale
-        # value is replaced, never duplicated.
-        pat = re.compile(rf'<(int|float) name="{re.escape(key)}" value="-?\d+" />')
-        xml = pat.sub(entry, xml) if pat.search(xml) else xml.replace("</map>", f"    {entry}\n</map>")
-    device.write_prefs(_prefs_path(device.package), xml)
+    if "<map" in xml:
+        for key, val in _CURSOR_TEST_PREFS.items():
+            xml = _set_float_pref(xml, key, str(val))
+        device.write_prefs(_prefs_path(device.package), xml)
+    else:
+        return  # main prefs not initialized yet; the code defaults will apply
+    # Configuration-scoped file: disable the toolbar auto-hide for the run's orientation.
+    orientation = device.config()["orientation"]
+    config_xml = device.read_prefs(_config_prefs_path(device.package, orientation))
+    if "<map" in config_xml:
+        config_xml = _set_float_pref(config_xml, "pref_key_hide_tool_bar_timeout", "0")
+        device.write_prefs(_config_prefs_path(device.package, orientation), config_xml)
 
 
 def _load_page(device, page: str) -> None:
@@ -364,6 +396,36 @@ def test_cursor_click_hesitant_press_still_clicks(device, ctx: dict) -> None:
     _toggle(device)
 
 
+def test_cursor_confirm_yields_to_focused_widget(device, ctx: dict) -> None:
+    # When the cursor is on but Android focus is on a toolbar widget (not the web content),
+    # the confirm key (A / DPAD center / ENTER) must go to the focused control -- NOT click the
+    # page under the cursor. Focus is on the WebView after load; turning the cursor OFF moves
+    # focus to the toolbar menu button (button_more), and turning it back ON leaves focus there
+    # (enabling never moves focus) -- so this yields cursor-on + focus-on-a-toolbar-widget.
+    # Regression: the cursor used to consume the confirm key unconditionally, so it clicked the
+    # WebView under the cursor instead of activating the focused widget.
+    _load_target(device)
+    _toggle(device)          # cursor on
+    _toggle(device)          # cursor off -> focus moves to button_more
+    assert _focused_resource_id(device).endswith(":id/button_more"), \
+        f"setup: focus should be on the toolbar menu button, was '{_focused_resource_id(device)}'"
+    _toggle(device)          # cursor on again; enabling does not move focus
+    assert _overlay_present(device), "the cursor should be on"
+    assert _focused_resource_id(device).endswith(":id/button_more"), \
+        f"enabling the cursor must not move focus; focus should still be on button_more, was '{_focused_resource_id(device)}'"
+    device.key(keys.DPAD_CENTER, wait=1.2)  # the confirm key (A / DPAD center / ENTER)
+    title = _title(device)
+    assert not re.fullmatch(r"\d+,\d+", title.strip()), \
+        ("the confirm key with focus on a toolbar widget must activate that widget, "
+         f"not click the page under the cursor; the page was clicked (title was '{title}')")
+    # On leanback, activating the menu button opens the main menu (positive confirmation).
+    if device.is_leanback():
+        assert device.find_node(":id/menuItemCursor") is not None, \
+            "activating the menu button with the cursor on should open the main menu"
+        device.key(keys.BACK, wait=0.8)  # dismiss the menu
+    _toggle(device)          # leave the cursor off
+
+
 # ===========================================================================
 # Feature: cursor menu integration / visibility
 # ===========================================================================
@@ -443,7 +505,8 @@ def test_cursor_media_play_pause(device, ctx: dict) -> None:
 
 
 # ===========================================================================
-# Feature: media keys act as a mouse wheel while the cursor is on screen
+# Feature: media keys and gamepad shoulder buttons act as a mouse wheel while
+# the cursor is on screen
 # ===========================================================================
 
 
@@ -463,6 +526,17 @@ def test_cursor_wheel_ff_rewind_scrolls(device, ctx: dict) -> None:
     t2 = _title(device)
     m2 = re.fullmatch(r"sy(\d+)", t2.strip())
     assert m2 and int(m2.group(1)) < down, f"fast-forward with the cursor on should wheel-scroll back up, was '{t1}' now '{t2}'"
+    # The gamepad shoulder buttons are the same wheel (a standard gamepad has no media
+    # keys): RB scrolls down, LB scrolls up, at the cursor.
+    device.key(keys.BUTTON_R1, wait=0.9)
+    t3 = _title(device)
+    m3 = re.fullmatch(r"sy(\d+)", t3.strip())
+    assert m3 and int(m3.group(1)) > int(m2.group(1)), f"RB with the cursor on should wheel-scroll down, was '{t2}' now '{t3}'"
+    device.key(keys.BUTTON_L1, wait=0.9)
+    device.key(keys.BUTTON_L1, wait=0.9)
+    t4 = _title(device)
+    m4 = re.fullmatch(r"sy(\d+)", t4.strip())
+    assert m4 and int(m4.group(1)) < int(m3.group(1)), f"LB with the cursor on should wheel-scroll up, was '{t3}' now '{t4}'"
     _toggle(device)
 
 
@@ -506,7 +580,16 @@ def test_cursor_youtube_scrubber_seek_after_idle(device, ctx: dict) -> None:
     assert _title(device).strip() == "ctrl-shown", "cursor enable should show player controls"
     for _ in range(50):
         device.key(keys.DPAD_DOWN, wait=0.03)
-    time.sleep(4.0)  # longer than yt_scrub.html's 3 s auto-hide
+    # Nudge up off the clamped bottom edge FIRST: the cursor clamps its hotspot to the exact
+    # overlay bottom, which maps just BELOW the CSS viewport (DPI-dependent -- e.g. the SHIELD's
+    # 1080p override over a 4K panel), so a click parked there lands outside the page (no pointer
+    # event at all) and the title stays 'ctrl-hidden'. A few steps up lands back inside the bar.
+    # Doing this BEFORE the sleep keeps the test's "after idle" meaning: the last hover is the
+    # up-nudge, so the 4 s sleep below auto-hides the controls again, and only the pre-click
+    # hover re-shows them before the click lands.
+    for _ in range(15):
+        device.key(keys.DPAD_UP, wait=0.03)
+    time.sleep(4.0)  # longer than yt_scrub.html's 3 s auto-hide (controls re-hide after the up-nudge)
     # Controls auto-hid. The pre-click hover (dispatchHover) + 80 ms delay gives YouTube
     # time to re-show controls before BUTTON_PRESS fires, so the click still seeks.
     device.key(keys.DPAD_CENTER, wait=1.0)  # extra wait for the 80 ms delay + DOM update
@@ -589,6 +672,7 @@ FEATURE_GROUPS = {
         test_cursor_click_activates_under_cursor,
         test_cursor_click_drag_target_seeks,
         test_cursor_click_hesitant_press_still_clicks,
+        test_cursor_confirm_yields_to_focused_widget,
     ],
     "cursor-menu": [
         test_cursor_menu_item_visible_on_leanback,
@@ -627,11 +711,12 @@ TEST_DESCRIPTIONS = {
     "test_cursor_click_activates_under_cursor": "Select press dispatches a click the page receives at the cursor",
     "test_cursor_click_drag_target_seeks": "A cursor click seeks a scrub bar via mousedown(mouse) or touch drag, like YouTube's timeline",
     "test_cursor_click_hesitant_press_still_clicks": "A realistically held (~600 ms) select press still clicks — only a deliberate ~1 s hold opens the context menu",
+    "test_cursor_confirm_yields_to_focused_widget": "With the cursor on but focus on a toolbar widget, the confirm key (A / select) activates the widget instead of clicking the page under the cursor",
     "test_cursor_menu_item_visible_on_leanback": "The Cursor main-menu item is shown on Android TV",
     "test_cursor_menu_item_toggles_mode": "Tapping the Cursor menu item turns the cursor on",
     "test_cursor_fullscreen_click_reaches_custom_view": "In HTML5 fullscreen the cursor is visible and its click reaches the fullscreen view",
     "test_cursor_media_play_pause": "The media play/pause key pauses and resumes the page video",
-    "test_cursor_wheel_ff_rewind_scrolls": "With the cursor on, fast-forward/rewind wheel-scroll the page up/down at the cursor",
+    "test_cursor_wheel_ff_rewind_scrolls": "With the cursor on, fast-forward/rewind and the gamepad shoulder buttons (LB/RB) wheel-scroll the page up/down at the cursor",
     "test_cursor_youtube_scrubber_seek": "A cursor click seeks a YouTube-style auto-hiding scrubber (hover keeps controls alive, click seeks)",
     "test_cursor_youtube_scrubber_seek_after_idle": "Click seeks even after controls auto-hid (dispatchHover+delay re-shows them before BUTTON_PRESS lands) (leanback only)",
     "test_cursor_context_menu_action_long_press": "Long-press the action key (select / DPAD center) opens the WebView context menu for the element under the cursor",

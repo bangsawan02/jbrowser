@@ -782,6 +782,12 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         iCursorController = CursorController(
             overlay = iBinding.cursorOverlay,
             targetProvider = { iCursorTargetOverride ?: currentTabView },
+            // The confirm key only clicks at the cursor while the web content holds input focus;
+            // otherwise it is yielded to the focused control (a toolbar widget, the address field,
+            // a menu…). In HTML5 fullscreen the tab is INVISIBLE (onShowCustomView), which strips
+            // the WebView's focus, so the fullscreen custom view counts as focused web content
+            // — the cursor keeps its click there.
+            webContentFocusedProvider = { customView != null || currentTabView?.hasFocus() == true },
             settings = iCursorSettings,
             onCursorToggled = { enabled ->
                 application.toast(getString(if (enabled) R.string.cursor_on else R.string.cursor_off))

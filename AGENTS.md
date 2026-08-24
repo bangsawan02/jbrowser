@@ -176,7 +176,7 @@ python scripts/tests/run.py --all --group cursor-fade       # fade-out after ina
 python scripts/tests/run.py --all --group cursor-menu       # the menu item visibility/toggle
 python scripts/tests/run.py --all --group cursor-fullscreen # cursor works over HTML5 fullscreen
 python scripts/tests/run.py --all --group cursor-media      # hardware media keys drive the page video
-python scripts/tests/run.py --all --group cursor-wheel      # fast-forward/rewind = mouse wheel scroll while the cursor is on
+python scripts/tests/run.py --all --group cursor-wheel      # fast-forward/rewind and LB/RB = mouse wheel scroll while the cursor is on
 python scripts/tests/run.py --all --group cursor-youtube    # cursor click seeks a YouTube-style auto-hiding scrubber
 python scripts/tests/run.py --all --group cursor-context    # deliberate action-key hold opens the WebView context menu
 python scripts/tests/run.py --all --group toolbar-hide     # the "Hide tool bar after" auto-hide timeout
@@ -264,7 +264,12 @@ Key facts a future agent needs:
   still the normal click at the cursor: the click fires on the key `ACTION_UP`, so the
   `ACTION_DOWN` arms the hold timer and the UP resolves the press — if the timer already fired
   for this press, the UP is consumed and no click follows. With the cursor off the action key
-  falls through to its normal meaning.
+  falls through to its normal meaning. While the cursor is on but the **web content is not
+  focused**, the action key is likewise yielded to the focused control (a toolbar widget, the
+  address field, a menu) instead of clicking at the cursor; in HTML5 fullscreen the tab is
+  INVISIBLE (the custom fullscreen view is shown instead), which strips the WebView's focus,
+  so the provider counts the fullscreen view as focused web content and the cursor keeps
+  its click there.
   **Why ≥ 0.5 s, and why the OS long-press flag is ignored here:** a human "short click" on a
   remote is routinely held 400–700 ms — past the ~400 ms at which the OS starts raising
   `FLAG_LONG_PRESS` on the key's repeat events. The action-key path therefore deliberately
@@ -323,9 +328,12 @@ Key facts a future agent needs:
   `FAST_FORWARD` to the page's active `<video>` via `evaluateJavascript` (generic; cross-origin
   iframes are unreachable) — but **only when the cursor is off**. Long-press `PLAY_PAUSE` is the
   cursor toggle; the controller yields the *short* press back (returns false) so the activity can
-  play/pause. **With the cursor on, `FAST_FORWARD` / `REWIND` become a mouse wheel scroll** (up / down,
-  `WHEEL_NOTCHES` = 3) dispatched at the cursor point via the same `ACTION_SCROLL` path as edge
-  scroll, so you can scroll the page under the cursor with the remote's transport keys.
+  play/pause. **With the cursor on, `FAST_FORWARD` / `REWIND` and the gamepad shoulder buttons
+  `BUTTON_L1` (LB) / `BUTTON_R1` (RB) become a mouse wheel scroll** (up / down, `WHEEL_NOTCHES` = 3)
+  dispatched at the cursor point via the same `ACTION_SCROLL` path as edge scroll, so you can scroll
+  the page under the cursor — a gamepad has no media keys, so LB/RB are its wheel (ignored
+  off-cursor; the left stick keeps its native page scroll). The full gamepad/remote key map is in
+  `docs/features/gamepad.md`.
 - **Menu item visibility** (`isCursorAvailable()`): shown on leanback, or when a
   `SOURCE_GAMEPAD` / `SOURCE_JOYSTICK` / `SOURCE_DPAD` non-virtual device is connected. The
   menu is recomputed each time it opens, and the `InputDeviceListener` keeps it live as

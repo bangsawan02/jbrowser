@@ -84,10 +84,14 @@ import timber.log.Timber
  * **short** press is yielded back to the activity (returns false) so it can play/pause the page's
  * video. The activity forwards the key to us before it can reach a page's `MediaSession`.
  *
- * ## Media keys as a wheel
+ * ## Wheel scroll: media keys and gamepad shoulder buttons
  * While the cursor is on screen, [KeyEvent.KEYCODE_MEDIA_FAST_FORWARD] / [KeyEvent.KEYCODE_MEDIA_REWIND]
- * dispatch a synthetic mouse wheel scroll up / down at the cursor point (see [dispatchScroll]); when
- * the cursor is off, they fall through to the activity's per-video seek.
+ * (remote) and [KeyEvent.KEYCODE_BUTTON_L1] / [KeyEvent.KEYCODE_BUTTON_R1] (gamepad LB / RB) dispatch a
+ * synthetic mouse wheel scroll up / down at the cursor point (see [dispatchScroll]); when the cursor is
+ * off, the media keys fall through to the activity's per-video seek (LB / RB are not used by the
+ * browser and are simply ignored off-cursor). A standard gamepad has no media keys, so the shoulder
+ * buttons are its wheel — they are discrete and repeatable, exactly like wheel notches, while the
+ * left stick keeps doing its coarse native WebView scroll.
  *
  * ## Context menu via the action key
  * While the cursor is on screen, a **deliberate long press** of the action key
@@ -103,13 +107,24 @@ import timber.log.Timber
  * flagging the key with [KeyEvent.FLAG_LONG_PRESS] — and the system flag must therefore be
  * ignored here, or hesitant clicks would open the context menu instead of clicking.
  *
- * With the cursor off the action key falls through to its normal meaning.
+ * With the cursor off the action key falls through to its normal meaning. While the cursor is on
+ * but the **web content is not focused** ([webContentFocusedProvider]) — e.g. focus is on a
+ * toolbar widget or a menu — the action key is likewise yielded to the focused control instead
+ * of clicking at the cursor. In HTML5 fullscreen the provider reports the web content as
+ * focused (the tab itself is INVISIBLE while the custom fullscreen view is shown), so the
+ * cursor keeps its click there.
  */
 class CursorController(
     private val overlay: CursorView,
     private val targetProvider: () -> View?,
     private val settings: CursorSettings,
     private val onCursorToggled: (enabled: Boolean) -> Unit,
+    // Whether the web content currently "holds focus": the current tab's WebView has input
+    // focus, OR an HTML5 fullscreen custom view is up (the tab is INVISIBLE then, so the
+    // WebView's focus is stripped — the fullscreen view counts as web content). Re-queried on
+    // every key event. Decides whether the confirm key clicks at the cursor or is yielded to
+    // the focused control (see [dispatchKeyEvent]).
+    private val webContentFocusedProvider: () -> Boolean = { true },
 ) {
 
     // Cursor on: D-pad drives the cursor and select clicks. Independent of [shown].
@@ -198,14 +213,19 @@ class CursorController(
             return handleHotkey(event)
         }
 
-        // While the cursor is on screen, fast-forward / rewind become a mouse wheel scroll at the
-        // cursor (up / down respectively); off-cursor they fall through to the activity's video seek.
-        if ((enabled || shown) &&
-            (event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || event.keyCode == KeyEvent.KEYCODE_MEDIA_REWIND)) {
+        // While the cursor is on screen, the wheel keys become a mouse wheel scroll at the cursor:
+        // fast-forward / LB scroll up, rewind / RB scroll down. Off-cursor the media keys fall
+        // through to the activity's video seek; LB / RB have no browser role and are ignored.
+        val wheelNotches = when (event.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD, KeyEvent.KEYCODE_BUTTON_L1 -> WHEEL_NOTCHES
+            KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_BUTTON_R1 -> -WHEEL_NOTCHES
+            else -> 0f
+        }
+        if ((enabled || shown) && wheelNotches != 0f) {
             if (event.action == KeyEvent.ACTION_DOWN) {
                 wakeCursor()
-                val notches = if (event.keyCode == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) WHEEL_NOTCHES else -WHEEL_NOTCHES
-                dispatchScroll(notches, 0f)
+                Timber.d("Cursor: wheel ${event.keyCode} -> ${wheelNotches} notches (enabled=$enabled shown=$shown)")
+                dispatchScroll(wheelNotches, 0f)
             }
             return true
         }
@@ -216,6 +236,14 @@ class CursorController(
         // and so opens the WebView's context menu for the element under the cursor. The click
         // fires on ACTION_UP, so a DOWN arms the long-press timer and the UP resolves the press.
         if (isConfirmKey(event.keyCode) && (enabled || shown)) {
+            // One exception: while the web content is NOT focused, the confirm key belongs to
+            // whatever widget holds focus (a toolbar button, a menu, …). Yield it so that widget
+            // is activated instead of the page being clicked under the cursor. (HTML5
+            // fullscreen counts as focused web content — see webContentFocusedProvider.)
+            if (!webContentFocusedProvider()) {
+                Timber.d("Cursor: yielding confirm key ${event.keyCode} (web content not focused)")
+                return false
+            }
             when (event.action) {
                 KeyEvent.ACTION_DOWN -> {
                     actionPressEvents += "d${event.keyCode}(r${event.repeatCount})"
