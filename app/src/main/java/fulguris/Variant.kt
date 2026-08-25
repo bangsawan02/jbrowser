@@ -37,10 +37,5 @@ object Variant {
      */
     fun isSlions(): Boolean = BuildConfig.FLAVOR_BRAND == "slions"
 
-    /**
-     * Check if the brand is Styx
-     */
-    fun isStyx(): Boolean = BuildConfig.FLAVOR_BRAND == "styx"
-
 }
 

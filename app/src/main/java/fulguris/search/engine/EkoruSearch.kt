@@ -13,6 +13,6 @@ import fulguris.R
  */
 class EkoruSearch : BaseSearchEngine(
     "file:///android_asset/ekoru.webp",
-    "https://www.ekoru.org/?ext=styx&q=",
+    "https://www.ekoru.org/?q=",
     R.string.search_engine_ekoru
 )

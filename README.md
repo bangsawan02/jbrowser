@@ -7,7 +7,7 @@ Fulguris is a [web browser] for Android. Through a customizable interface it off
 [![Google Play](https://github.com/Slion/Fulguris/actions/workflows/build-main-fulguris-google-play.yml/badge.svg)](https://github.com/Slion/Fulguris/actions/workflows/build-main-fulguris-google-play.yml)
 [![Download](https://github.com/Slion/Fulguris/actions/workflows/build-main-fulguris-download.yml/badge.svg)](https://github.com/Slion/Fulguris/actions/workflows/build-main-fulguris-download.yml)
 [![F-Droid](https://github.com/Slion/Fulguris/actions/workflows/build-main-fulguris-fdroid.yml/badge.svg)](https://github.com/Slion/Fulguris/actions/workflows/build-main-fulguris-fdroid.yml)
-[![Rebrand](https://github.com/Slion/Fulguris/actions/workflows/build-main-styx.yml/badge.svg)](https://github.com/Slion/Fulguris/actions/workflows/build-main-styx.yml)
+[![Agent](https://github.com/Slion/Fulguris/actions/workflows/build-main-fulguris-agent.yml/badge.svg)](https://github.com/Slion/Fulguris/actions/workflows/build-main-fulguris-agent.yml)
 
 # Downloads
 

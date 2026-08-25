@@ -133,13 +133,6 @@ android {
             versionName libs.versions.slions.version.name.get()
         }
 
-        styx {
-            dimension "BRAND"
-            applicationId "com.jamal2367.styx"
-            versionCode libs.versions.styx.version.code.get().toInteger()
-            versionName libs.versions.styx.version.name.get()
-        }
-
         /*
         lightning {
             dimension "BRAND"
@@ -214,9 +207,7 @@ android {
     variantFilter { variant ->
         def names = variant.flavors*.name
         // slions variant do not support base version and undef publisher
-        if ((names.contains("slions") && (names.contains("undef") || names.contains("base")))
-                // styx variant only support base version and undef publisher
-                || (names.contains("styx") && !(names.contains("undef") && names.contains("base")))) {
+        if (names.contains("slions") && (names.contains("undef") || names.contains("base"))) {
             // Gradle ignores any variants that satisfy the conditions above.
             setIgnore(true)
         }
@@ -249,9 +240,6 @@ android {
             if (variant.flavorName.contains("slions")) {
                 //println("Use Fulguris archive name")
                 outputFileName = outputFileName.replaceFirst("^${base.archivesName.get()}", "Fulguris-v$versionName")
-            } else if (variant.flavorName.contains("styx")) {
-                //println("Use Styx archive name")
-                outputFileName = outputFileName.replaceFirst("^${base.archivesName.get()}", "Styx-v$versionName")
             }
             //customize your app name by using variables
             //outputFileName = "${variantName}.apk"

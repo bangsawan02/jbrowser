@@ -605,7 +605,7 @@ class BackupSettingsFragment : AbstractSettingsFragment() {
                 timeStamp = dateFormat.format(Date())
             }
             // That is a neat feature as it guarantee no file will be overwritten.
-            putExtra(Intent.EXTRA_TITLE, "StyxSettings$timeStamp.txt")
+            putExtra(Intent.EXTRA_TITLE, "FulgurisSettings$timeStamp.txt")
         }
         startActivityForResult(intent, EXPORT_SETTINGS)
 

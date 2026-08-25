@@ -1,4 +1,4 @@
-name: Rebrand
+name: Agent
 
 on:
   push:
@@ -23,5 +23,5 @@ jobs:
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
-    - name: Build Styx variants
-      run: ./gradlew assembleStyxBaseUndef
+    - name: Build Agent variants
+      run: ./gradlew assembleSlionsFullAgent
