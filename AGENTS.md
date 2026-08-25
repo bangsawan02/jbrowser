@@ -5,8 +5,16 @@ Guidance for AI agents (and humans) working in this repository.
 Fulguris is an Android web browser (Kotlin, Gradle, Hilt, RxJava, DataBinding).
 The most common development loop is **build → install → test on real devices over adb**,
 which is fully scriptable. **Always use the `scripts/` tooling instead of calling
-`adb` or `gradlew` directly** — the scripts handle device selection, the debug flavor,
+`adb` or `gradlew` directly** — the scripts handle device selection, the build type,
 APK path, and UTF-8 quirks of the Windows terminal.
+
+**The scripts build and install the `slionsFullAgentDebug` variant by default** —
+the `agent` PUBLISHER flavor's debug build, with a split-bolt launcher icon and a
+distinct application id, so agent-driven installs never clobber a developer's own
+debug install. See
+[docs/features/agent-variant.md](docs/features/agent-variant.md). Pass
+`--build-type agentRelease` to the build/install tools to use the release build of
+the agent flavor instead.
 
 ## Never get blocked — keep the agent moving
 
@@ -52,9 +60,9 @@ differs from touch/keyboard behavior on phones.
 
 | Command | Purpose |
 |---|---|
-| `python scripts/tools/build.py` | Build the debug APK (`assembleSlionsFullDownloadDebug`). Prints the APK path on success. |
-| `python scripts/tools/install.py --build --all` | Build then install on **all** connected devices. This is the default "deploy" command. |
-| `python scripts/tools/install.py --device SERIAL` | Install (already-built) APK on one device. |
+| `python scripts/tools/build.py` | Build the **agentDebug** APK (`assembleSlionsFullAgentDebug`). `--build-type agentRelease` for the agent flavor's release build. Prints the APK path on success. |
+| `python scripts/tools/install.py --build --all` | Build then install the **agentDebug** APK on **all** connected devices. This is the default "deploy" command. `--build-type agentRelease` for the agent flavor's release build. |
+| `python scripts/tools/install.py --device SERIAL` | Install (already-built) agentDebug APK on one device. |
 | `python scripts/tools/launch.py --restart --all` | Force-stop and relaunch the app on device(s). Use after install to get a clean state. |
 | `python scripts/tools/capture.py --all` | Screenshot each device to `scripts/tools/out/<serial>.png`. `--out path.png` for a single device. |
 | `python scripts/tools/ui.py state` | Print address-bar state: field focus, field text, keyboard shown, webview focus, popup present. |

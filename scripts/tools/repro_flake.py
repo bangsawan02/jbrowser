@@ -18,7 +18,7 @@ sys.path.insert(0, "scripts/tools")
 import adb  # noqa: E402
 
 SERIAL = sys.argv[1] if len(sys.argv) > 1 else "R58R91GBTZK"
-PACKAGE = "net.slions.fulguris.full.download.debug"
+PACKAGE = adb.DEFAULT_PACKAGE
 KEY_HOME = 3
 
 t0 = time.time()

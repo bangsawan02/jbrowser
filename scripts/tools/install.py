@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Install the debug APK on a device or on all connected devices.
+"""Install the agentDebug APK on a device or on all connected devices.
+
+The agentDebug variant (slionsFullAgentDebug) is a debug build of the "agent"
+PUBLISHER flavor — a robot launcher icon, dedicated to automated testing; see
+docs/features/agent-variant.md.
 
     python scripts/tools/install.py                 # single device, or all if only one
     python scripts/tools/install.py --all
     python scripts/tools/install.py --device SERIAL
     python scripts/tools/install.py --build         # build first, then install
+    python scripts/tools/install.py --build-type agentRelease
 """
 from __future__ import annotations
 
@@ -18,15 +23,18 @@ def main() -> int:
     parser.add_argument("--device", help="Target a specific adb device serial")
     parser.add_argument("--all", action="store_true", help="Install on all connected devices")
     parser.add_argument("--build", action="store_true", help="Build before installing")
+    parser.add_argument("--build-type", choices=sorted(adb.AGENT_VARIANTS),
+                        default=adb.DEFAULT_BUILD_TYPE,
+                        help="Which Agent variant to install (default: agentDebug)")
     args = parser.parse_args()
 
     if args.build:
-        code = adb.gradle_build()
+        code = adb.gradle_build(args.build_type)
         if code != 0:
             print("Build FAILED, not installing.")
             return code
 
-    apk = adb.apk_path()
+    apk = adb.apk_path(args.build_type)
     if not apk:
         print("No APK found; run build first.")
         return 2

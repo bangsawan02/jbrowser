@@ -121,8 +121,13 @@ android {
 
     productFlavors {
 
+        // The IDE default build variant is slionsFullDownloadDebug: isDefault is set
+        // once per flavor dimension (slions / full / download). The automation scripts
+        // are unaffected - they build the agent flavor explicitly, see
+        // scripts/tools/adb.py (AGENT_VARIANTS) and docs/features/agent-variant.md.
         slions {
             dimension "BRAND"
+            isDefault = true
             applicationId "net.slions.fulguris"
             versionCode libs.versions.slions.version.code.get().toInteger()
             versionName libs.versions.slions.version.name.get()
@@ -152,6 +157,7 @@ android {
 
         full {
             dimension "VERSION"
+            isDefault = true
             buildConfigField "boolean", "FULL_VERSION", "Boolean.parseBoolean(\"true\")"
             applicationIdSuffix ".full"
         }
@@ -178,6 +184,7 @@ android {
 
         download {
             dimension "PUBLISHER"
+            isDefault = true
             applicationIdSuffix ".download"
             buildConfigField "fulguris.Sponsorship", "SPONSORSHIP", "fulguris.Sponsorship.BRONZE"
         }
@@ -185,6 +192,19 @@ android {
         fdroid {
             dimension "PUBLISHER"
             applicationIdSuffix ".fdroid"
+            buildConfigField "fulguris.Sponsorship", "SPONSORSHIP", "fulguris.Sponsorship.BRONZE"
+        }
+
+        // Agent publisher: dedicated to AI-agent automated testing. Carries a
+        // distinct launcher icon (a robot, see app/src/agent/res) and a distinct
+        // application id so an agent-driven install lives ALONGSIDE a developer's
+        // own debug/release builds instead of clobbering them. Pairs with the
+        // standard build types: slionsFullAgentDebug / slionsFullAgentRelease.
+        // Not published anywhere and (unlike download/playstore) does not apply
+        // the Firebase plugins. See docs/features/agent-variant.md.
+        agent {
+            dimension "PUBLISHER"
+            applicationIdSuffix ".agent"
             buildConfigField "fulguris.Sponsorship", "SPONSORSHIP", "fulguris.Sponsorship.BRONZE"
         }
 

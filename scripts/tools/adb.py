@@ -15,14 +15,26 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass
 
-# Default debug package / launcher activity for the slionsFullDownload debug flavor.
-DEFAULT_PACKAGE = "net.slions.fulguris.full.download.debug"
+# Default package / launcher activity for the slionsFullAgentDebug variant.
+# "agent" is a PUBLISHER-dimension flavor (like download/fdroid) that carries a
+# robot launcher icon and a ".agent" application-id suffix, dedicated to
+# automated testing so agent-driven builds never clobber a developer's own
+# debug/release install. The test harness builds slionsFullAgentDebug
+# (debuggable, so it supports run-as / logcat). See docs/features/agent-variant.md.
+DEFAULT_PACKAGE = "net.slions.fulguris.full.agent.debug"
 LAUNCH_ACTIVITY = "fulguris.activity.SplashActivity"
 MAIN_ACTIVITY = "fulguris.activity.MainActivity"
 
-# Gradle assemble task and where its APK lands.
-GRADLE_TASK = ":app:assembleSlionsFullDownloadDebug"
-APK_GLOB = "app/build/outputs/apk/slionsFullDownload/debug/*.apk"
+# Gradle assemble task / APK location per Agent variant. agentDebug is the
+# default (debuggable, so it supports run-as / logcat) and what the test harness
+# uses; agentRelease is a minified/shrunk build for testing release behavior.
+AGENT_VARIANTS = {
+    "agentDebug": (":app:assembleSlionsFullAgentDebug",
+                   "app/build/outputs/apk/slionsFullAgent/debug/*.apk"),
+    "agentRelease": (":app:assembleSlionsFullAgentRelease",
+                     "app/build/outputs/apk/slionsFullAgent/release/*.apk"),
+}
+DEFAULT_BUILD_TYPE = "agentDebug"
 
 # Key codes we use.
 KEY_BACK = 4
@@ -46,17 +58,19 @@ def repo_root() -> str:
 # --- Build / install -------------------------------------------------------
 
 
-def gradle_build() -> int:
-    """Run the debug assemble task. Returns the process exit code."""
+def gradle_build(build_type: str = DEFAULT_BUILD_TYPE) -> int:
+    """Run the Agent assemble task for the given build type. Returns the exit code."""
+    gradle_task, _ = AGENT_VARIANTS[build_type]
     root = repo_root()
     gradlew = os.path.join(root, "gradlew.bat" if os.name == "nt" else "gradlew")
-    print(f"Building {GRADLE_TASK} ...")
-    result = subprocess.run([gradlew, GRADLE_TASK], cwd=root)
+    print(f"Building {gradle_task} ...")
+    result = subprocess.run([gradlew, gradle_task], cwd=root)
     return result.returncode
 
 
-def apk_path() -> str | None:
-    matches = glob.glob(os.path.join(repo_root(), APK_GLOB))
+def apk_path(build_type: str = DEFAULT_BUILD_TYPE) -> str | None:
+    _, apk_glob = AGENT_VARIANTS[build_type]
+    matches = glob.glob(os.path.join(repo_root(), apk_glob))
     if not matches:
         return None
     return max(matches, key=os.path.getmtime)
@@ -146,6 +160,10 @@ def detect_package(serial: str) -> str:
         return DEFAULT_PACKAGE
     if DEFAULT_PACKAGE in packages:
         return DEFAULT_PACKAGE
+    # Prefer an Agent build, then fall back to a plain debug build, then anything.
+    agent = [p for p in packages if ".agent." in p]
+    if agent:
+        return agent[0]
     debug = [p for p in packages if p.endswith(".debug")]
     return debug[0] if debug else packages[0]
 
