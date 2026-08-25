@@ -500,6 +500,27 @@ def tap(serial: str, x: int, y: int, wait: float = 0.7) -> None:
     time.sleep(wait)
 
 
+def cursor_teleport(serial: str, package: str, x: float, y: float, wait: float = 0.6) -> None:
+    """Teleport the on-screen cursor to screen point ``(x, y)`` (debug builds only).
+
+    The cursor overlay is the top-most child of the root and is laid out at the screen origin,
+    so overlay-local coordinates equal screen coordinates — no DPI / offset math. A D-pad press
+    count can't deterministically land the cursor over a specific control across devices (the
+    per-press step is DPI-dependent and key events get dropped over network adb), so tests use
+    this to place it exactly over a control and then exercise the confirm key / hover against it.
+    No-op on release builds (the receiver is not registered there).
+    """
+    action = f"{package}.action.cursor_test_teleport"
+    _adb(serial, [
+        "shell", "am", "broadcast",
+        "-p", package,
+        "-a", action,
+        "--ef", "x", str(float(x)),
+        "--ef", "y", str(float(y)),
+    ])
+    time.sleep(wait)
+
+
 # Meta / combo key codes for key_combination.
 KEY_CTRL_LEFT = 113
 KEY_TAB = 61

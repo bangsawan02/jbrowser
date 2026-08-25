@@ -30,6 +30,7 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewConfiguration
 import java.lang.reflect.Method
 import kotlin.math.abs
@@ -71,6 +72,11 @@ import timber.log.Timber
  *  - [overlay]: the [CursorView] it renders into (and whose bounds it clamps to);
  *  - [targetProvider]: a way to fetch the view to dispatch into (the current WebView, or the
  *    fullscreen custom view while an HTML5 video is fullscreen), re-queried on every dispatch;
+ *  - [uiRootProvider]: the root of the browser's own UI (toolbar, tab bar, drawers…). While the
+ *    cursor hotspot lies over one of those views (rather than over the web content) a click or
+ *    long press is delivered to that view — the toolbar buttons, the address field, the tab bar —
+ *    instead of the web page; see [clickUiView] and [isUiPoint]. Wheel scrolling is always the
+ *    web page's job ([dispatchScroll]);
  *  - [settings]: [CursorSettings] for the hotkey / speed / acceleration / fade timeout;
  *  - [onCursorToggled]: notified when the cursor is toggled on/off (the activity shows feedback and moves focus).
  *
@@ -119,17 +125,39 @@ class CursorController(
     private val targetProvider: () -> View?,
     private val settings: CursorSettings,
     private val onCursorToggled: (enabled: Boolean) -> Unit,
+    // Root of the browser's own UI (the whole activity content: toolbar + web area + drawers).
+    // Used to hit-test whether the cursor is over a UI control (toolbar button, address field,
+    // tab bar, …) so clicks reach it instead of the web page (see [isUiPoint] / [clickUiView]).
+    // Null (default) disables UI clicks — the cursor only ever acts on the web page.
+    private val uiRootProvider: (() -> View?)? = null,
     // Whether the web content currently "holds focus": the current tab's WebView has input
     // focus, OR an HTML5 fullscreen custom view is up (the tab is INVISIBLE then, so the
     // WebView's focus is stripped — the fullscreen view counts as web content). Re-queried on
     // every key event. Decides whether the confirm key clicks at the cursor or is yielded to
     // the focused control (see [dispatchKeyEvent]).
     private val webContentFocusedProvider: () -> Boolean = { true },
+    // The bounds of the WEB CONTENT region (the container that holds the page), used to decide
+    // whether the cursor point is over the web content or over the browser's own UI (see
+    // [isUiPoint]). This is NOT necessarily [targetProvider]: the WebView itself can extend
+    // beyond its container (it reaches up behind the status bar on some devices), so testing
+    // against the WebView's own bounds would misclassify the toolbar as web content. The
+    // container (the browser's web area, below the toolbar) is the geometrically correct
+    // boundary. Defaults to [targetProvider] so existing wiring is unaffected.
+    private val contentBoundsProvider: () -> View? = targetProvider,
 ) {
 
     // Cursor on: D-pad drives the cursor and select clicks. Independent of [shown].
     var enabled: Boolean = false
         private set
+
+    // Whether the cursor is temporarily suspended because the activity is showing an overlay that
+    // must own the input (main menu, sessions menu, a dialog, a bottom sheet…). While suspended the
+    // overlay is hidden and every input event is yielded (returned unconsumed) so it reaches the
+    // overlay's own focus navigation. [suspendCursor] / [resumeCursor] are called by the activity
+    // as those overlays open and close; a non-zero [suspendCount] means at least one such overlay
+    // is up (they can nest, e.g. a menu over a sheet).
+    private var suspended = false
+    private var suspendCount = 0
 
     // Whether the cursor overlay is currently faded in (visible). Driven by the cursor being on OR
     // the right stick, and cleared by the fade-out timeout.
@@ -137,6 +165,11 @@ class CursorController(
 
     // Whether the cursor has ever been placed (so re-enabling doesn't recenter a right-stick cursor).
     private var positioned = false
+
+    // The browser-UI view that currently has the synthetic hover (a toolbar button, …). Tracked so a
+    // HOVER_EXIT can be sent when the cursor leaves it (moves to another control, back to the page,
+    // or the cursor is suspended / disabled) — otherwise its hover highlight would get stuck on.
+    private var hoveredUiView: View? = null
 
     // Logical cursor position, in overlay-local pixels.
     private var posX = 0f
@@ -206,6 +239,12 @@ class CursorController(
      * Forward the activity's key events here first. Returns true when consumed.
      */
     fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        // While a menu / dialog / bottom sheet is up the cursor is suspended and must not eat any
+        // input: yield EVERYTHING (including the toggle hotkey) so it reaches the overlay's own
+        // focus navigation / back handling. The hotkey must not toggle the cursor back on while a
+        // menu is open.
+        if (suspended) return false
+
         // The toggle hotkey is a long press of play/pause, handled whether or not the cursor is
         // currently on. A short press is yielded back (returns false) so the activity can play/pause
         // the page's video.
@@ -236,12 +275,21 @@ class CursorController(
         // and so opens the WebView's context menu for the element under the cursor. The click
         // fires on ACTION_UP, so a DOWN arms the long-press timer and the UP resolves the press.
         if (isConfirmKey(event.keyCode) && (enabled || shown)) {
-            // One exception: while the web content is NOT focused, the confirm key belongs to
-            // whatever widget holds focus (a toolbar button, a menu, …). Yield it so that widget
-            // is activated instead of the page being clicked under the cursor. (HTML5
-            // fullscreen counts as focused web content — see webContentFocusedProvider.)
-            if (!webContentFocusedProvider()) {
-                Timber.d("Cursor: yielding confirm key ${event.keyCode} (web content not focused)")
+            // The cursor's POSITION decides the confirm key's target:
+            //  - Over the browser's own UI (toolbar button, address field, tab bar, …) the cursor
+            //    is in charge — it activates whatever control is under it, REGARDLESS of which
+            //    widget holds input focus. (Otherwise a stray focus on one toolbar button would
+            //    steal the click from the button the cursor is actually pointing at.) This works
+            //    whether or not the web content is focused.
+            //  - Over the web content while that content is NOT focused, the cursor is a passive
+            //    ghost (not actively driving anything), so the key is YIELDED to whatever widget
+            //    holds focus (a toolbar button, a menu, …) instead of clicking the page under the
+            //    cursor.
+            //  - Over the web content while it IS focused, the key clicks the page at the cursor.
+            // (HTML5 fullscreen counts as focused web content — see webContentFocusedProvider. A
+            //  menu / dialog / sheet is suspended, so this branch is never reached with one up.)
+            if (!webContentFocusedProvider() && !isUiPoint()) {
+                Timber.d("Cursor: yielding confirm key ${event.keyCode} (over web, web content not focused)")
                 return false
             }
             when (event.action) {
@@ -311,6 +359,8 @@ class CursorController(
      * right stick's Z/RZ axes aren't used by either of those.
      */
     fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        // While a menu / dialog / bottom sheet is up the cursor is suspended; yield the stick too.
+        if (suspended) return false
         if (event.source and InputDevice.SOURCE_CLASS_JOYSTICK == 0) return false
         if (event.action != MotionEvent.ACTION_MOVE) return false
         // Only if the device actually has a centered right stick (exclude devices that report
@@ -334,12 +384,74 @@ class CursorController(
         if (enabled) disable() else enable()
     }
 
+    /**
+     * Suspend the cursor for the lifetime of an input-owning overlay (a menu, dialog or bottom
+     * sheet the activity is showing). The overlay is hidden and all input is yielded to the
+     * overlay; call [resumeCursor] when it closes. Balanced calls are expected (the activity
+     * suspends once per overlay-shown and resumes once per overlay-hidden). Unlike [disable] this
+     * does NOT notify [onCursorToggled] (no toast / focus change) — the user's cursor setting is
+     * preserved, it is merely paused while the overlay is up.
+     */
+    fun suspendCursor() {
+        if (suspended) {
+            // Already suspended (nested overlay); just track the extra level.
+            suspendCount++
+            return
+        }
+        suspendCount = 1
+        suspended = true
+        Timber.d("Cursor: suspend (overlay up, enabled=$enabled)")
+        keyDx = 0; keyDy = 0
+        rsX = 0f; rsY = 0f
+        stopLoop()
+        handler.removeCallbacks(fadeRunnable)
+        // The cursor is leaving the screen (an overlay owns the input now); clear any hover it had
+        // placed on a toolbar control so its highlight doesn't linger under the menu.
+        clearUiHover()
+        if (shown) {
+            shown = false
+            overlay.visibility = View.GONE
+        }
+    }
+
+    /**
+     * Counterpart to [suspendCursor]: re-show the cursor if it is on (restoring from the CURRENT
+     * [enabled] state, so a toggle made from within the overlay is honored). Does not call
+     * [enable]/[disable] itself — those fire [onCursorToggled] (toast / focus) which already ran
+     * at the moment the user toggled.
+     */
+    fun resumeCursor() {
+        if (!suspended) return
+        if (--suspendCount > 0) return
+        suspended = false
+        Timber.d("Cursor: resume (overlay closed, enabled=$enabled)")
+        if (enabled) {
+            overlay.visibility = View.VISIBLE
+            overlay.post {
+                // Center it if it was never placed while hidden (enable's own centering is skipped
+                // while the overlay is GONE, when its measured size reads 0).
+                if (!positioned && overlay.maxX > 0f && overlay.maxY > 0f) {
+                    posX = overlay.maxX / 2f
+                    posY = overlay.maxY / 2f
+                    positioned = true
+                    overlay.setPosition(posX, posY)
+                }
+                wakeCursor()
+                dispatchHover()
+            }
+        }
+    }
+
+    /** Whether the cursor is currently suspended by an open overlay (menus / dialogs / sheets). */
+    fun isSuspended(): Boolean = suspended
+
     fun enable() {
         if (enabled) return
         enabled = true
         Timber.d("Cursor: enable")
         // Make the overlay visible now so it gets laid out before we read its size to center.
-        overlay.visibility = View.VISIBLE
+        // While suspended (a menu / dialog / sheet is up) it stays hidden until resumeCursor.
+        if (!suspended) overlay.visibility = View.VISIBLE
         overlay.post {
             // Center the cursor the first time it appears; keep its place if the right stick already
             // positioned it, so toggling the cursor on doesn't make it jump.
@@ -361,6 +473,9 @@ class CursorController(
         enabled = false
         Timber.d("Cursor: disable")
         keyDx = 0; keyDy = 0
+        // The cursor is going away: clear any synthetic hover on a browser-UI control (a toolbar
+        // button, …) so its :hover highlight doesn't get stuck on.
+        clearUiHover()
         // Keep the right stick able to move it; if nothing is driving it, let it hide.
         if (!hasMovementInput()) {
             hideCursor()
@@ -531,10 +646,99 @@ class CursorController(
         wakeCursor()
         dispatchHover()
 
+        // Wheel "notches": pushing past a screen edge scrolls the content the same way a real
+        // wheel does. The overlay now spans the whole activity (toolbar included), so the cursor
+        // reaches the screen's top edge while still over the toolbar — that is exactly where
+        // scroll-up is triggered, so this must NOT be gated on the cursor being over the web
+        // content (gating it would silently disable scrolling the page up).
         if (overflowX != 0f || overflowY != 0f) {
-            // Wheel "notches": pushing down/right scrolls the content the same way a real wheel does.
             dispatchScroll(-overflowY / SCROLL_PX_PER_NOTCH, -overflowX / SCROLL_PX_PER_NOTCH)
         }
+    }
+
+    // --- UI hit-testing (toolbar, tab bar, drawers) ---------------------------
+    //
+    // The overlay spans the whole activity (so the cursor is usable over the toolbar, not just the
+    // web view). The web content is exactly [targetProvider]; everything else under the overlay —
+    // the toolbar, the address field, the tab bar, the drawers, the find-in-page bar — is the
+    // browser's own UI. So "is the cursor over the UI?" reduces to "is the cursor's point OUTSIDE
+    // the web target's bounds?": outside, a click activates the UI control under it (and hover /
+    // wheel are withheld from the page); inside, everything goes to the page as before.
+
+    /**
+     * True when the cursor's point lies over the browser's own UI (toolbar, tab bar, drawers, …)
+     * rather than over the web content. When there is no web target at all (e.g. no tab) any
+     * point is treated as UI.
+     *
+     * The boundary is the WEB CONTENT CONTAINER's bounds ([contentBoundsProvider]), not the raw
+     * target's: the WebView's layout can extend beyond its container (it reaches up behind the
+     * status bar on some devices), so testing against the WebView's own bounds would misclassify
+     * the toolbar as web content. The container (the browser's web area, below the toolbar) is the
+     * geometrically correct boundary.
+     */
+    private fun isUiPoint(): Boolean {
+        val target = targetProvider() ?: return true
+        val content = contentBoundsProvider() ?: target
+        val (x, y) = targetCoords(content)
+        return x < 0f || x > content.width.toFloat() || y < 0f || y > content.height.toFloat()
+    }
+
+    /**
+     * Activate the browser UI control under the cursor with a synthetic tap.
+     *
+     * The overlay is the TOP-MOST child of the root, so a plain `root.dispatchTouchEvent(...)`
+     * would hit-test straight into the (non-clickable) overlay and stop — the control *beneath*
+     * it (a toolbar button, the address field, …) would never see the touch. Instead we find the
+     * deepest *interactive* view under the cursor ourselves ([hitTestUi]) — walking the tree but
+     * skipping the overlay — and dispatch the DOWN→MOVE→UP straight to THAT view, in its local
+     * coordinates. Dispatching to the leaf (rather than the root) is what makes the framework run
+     * its normal press state machine + `View.performClick()` on UP: a toolbar button fires its
+     * click listener, the address field gains focus.
+     */
+    private fun clickUiView() {
+        val root = uiRootProvider?.invoke() ?: return
+        val (rx, ry) = targetCoords(root)
+        val target = hitTestUi(root, rx, ry) ?: run {
+            Timber.d("Cursor: no interactive UI view under ($rx, $ry)")
+            return
+        }
+        val (x, y) = targetCoords(target)
+        Timber.d("Cursor: tap UI ${target} at ($x, $y)")
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+        val move = MotionEvent.obtain(downTime, downTime + 10, MotionEvent.ACTION_MOVE, x + 2f, y, 0)
+        val up = MotionEvent.obtain(downTime, downTime + 60, MotionEvent.ACTION_UP, x, y, 0)
+        try {
+            target.dispatchTouchEvent(down)
+            target.dispatchTouchEvent(move)
+            target.dispatchTouchEvent(up)
+        } finally {
+            down.recycle(); move.recycle(); up.recycle()
+        }
+    }
+
+    /**
+     * Depth-first hit test for the deepest view that is visible, enabled, laid out and actually
+     * interactive (clickable / long-clickable / focusable) at the point `(x, y)` in [root]'s
+     * coordinate space. The cursor [overlay] is skipped so a tap can pass through it to the
+     * control underneath. Returns null when nothing interactive is under the point.
+     */
+    private fun hitTestUi(v: View, x: Float, y: Float): View? {
+        if (v === overlay) return null
+        if (v.visibility != View.VISIBLE || !v.isEnabled) return null
+        if (v.width == 0 || v.height == 0) return null
+        if (x < 0f || x > v.width || y < 0f || y > v.height) return null
+        if (v is ViewGroup) {
+            // Children are drawn (and laid out) bottom-up, so walk top-down to reach the
+            // topmost (last) child first.
+            for (i in v.childCount - 1 downTo 0) {
+                val c = v.getChildAt(i)
+                val hit = hitTestUi(c, x - c.x, y - c.y)
+                if (hit != null) return hit
+            }
+            return null
+        }
+        return if (v.isClickable || v.isLongClickable || v.isFocusable) v else null
     }
 
     // --- Synthetic pointer events -------------------------------------------
@@ -548,8 +752,48 @@ class CursorController(
 
     private fun dispatchHover(xOffset: Float = 0f) {
         val target = targetProvider() ?: return
-        val (x, y) = targetCoords(target)
         val now = SystemClock.uptimeMillis()
+        if (isUiPoint()) {
+            // Over one of the browser's own UI controls (a toolbar button, the address field, the
+            // tab bar, …): send the cursor as a mouse hover to the deepest interactive view under
+            // it, so the control gets its hover highlight (the faint "halo" a mouse produces) and
+            // tooltip, exactly as the web page does. When the cursor leaves that control (moves to
+            // another one, back to the page, or the cursor is suspended / disabled) a matching
+            // HOVER_EXIT is sent so its hover highlight is cleared (tracked in [hoveredUiView]).
+            //
+            // The hover is delivered through the control's own [View.onHoverEvent] — NOT
+            // dispatchGenericMotionEvent. View.onHoverEvent is the framework's hover state
+            // handler (the protected dispatchHoverEvent delegates hover actions straight to it):
+            // on HOVER_ENTER/HOVER_MOVE it sets the view's hovered/pressed state, on HOVER_EXIT
+            // it clears it (see AbsListView/DropDownListView: "let the super class handle hover
+            // state management first" -> super.onHoverEvent). A well-formed hover is
+            // ENTER -> MOVE* -> EXIT (InputEventConsistencyVerifier enforces a prior ENTER).
+            // dispatchGenericMotionEvent instead routes to onGenericMotionEvent, which the base
+            // View ignores for hover actions — so the original code (a bare HOVER_MOVE through
+            // it) never set the hovered state and produced no halo. (The WebView is the
+            // exception: Chromium overrides onGenericMotionEvent for CSS :hover, which is why
+            // the web path below keeps using dispatchGenericMotionEvent.)
+            val root = uiRootProvider?.invoke() ?: return
+            val (rx, ry) = targetCoords(root)
+            val view = hitTestUi(root, rx, ry)
+            if (view !== hoveredUiView) {
+                hoveredUiView?.let { exitUiHover(it, now) }
+                hoveredUiView = view
+                if (view != null) {
+                    // A real mouse (and the framework's dispatchHoverEvent) always send a
+                    // HOVER_ENTER the first time the pointer lands on a view, THEN the
+                    // HOVER_MOVE. It is that ENTER that flips the view into its hovered
+                    // state (the faint halo); a bare HOVER_MOVE alone never does. Mirror it.
+                    uiHover(view, MotionEvent.ACTION_HOVER_ENTER, now)
+                    uiHover(view, MotionEvent.ACTION_HOVER_MOVE, now)
+                }
+            }
+            return
+        }
+        // Over the web content: the cursor leaves any UI control it was over, so clear its hover.
+        hoveredUiView?.let { exitUiHover(it, now) }
+        hoveredUiView = null
+        val (x, y) = targetCoords(target)
         val event = obtainMouseEvent(now, now, MotionEvent.ACTION_HOVER_MOVE, x + xOffset, y, 0)
         try {
             target.dispatchGenericMotionEvent(event)
@@ -558,9 +802,39 @@ class CursorController(
         }
     }
 
+    /** Clear a synthetic hover on a browser-UI view (its [hoveredUiView] counterpart). */
+    private fun exitUiHover(view: View, now: Long) {
+        uiHover(view, MotionEvent.ACTION_HOVER_EXIT, now)
+    }
+
+    /**
+     * Deliver one synthetic mouse hover [action] to a browser-UI [view], in the view's local
+     * coordinates, through the view's own [View.onHoverEvent] — the framework's hover state
+     * handler. This is what drives the view's hover/pressed state (the faint "halo"): it is set
+     * on ENTER/MOVE and cleared on EXIT.
+     */
+    private fun uiHover(view: View, action: Int, now: Long) {
+        val (x, y) = targetCoords(view)
+        val event = obtainMouseEvent(now, now, action, x, y, 0)
+        try {
+            view.onHoverEvent(event)
+        } finally {
+            event.recycle()
+        }
+    }
+
+    /** Clear any pending UI hover (and forget which view had it). */
+    private fun clearUiHover() {
+        hoveredUiView?.let { exitUiHover(it, SystemClock.uptimeMillis()) }
+        hoveredUiView = null
+    }
+
     private fun dispatchClick() {
-        val target = targetProvider() ?: return
         wakeCursor()
+        // Over one of the browser's own UI controls (toolbar button, address field, tab bar, …)
+        // the click goes to that view — not to the web page (see [clickUiView]).
+        if (isUiPoint()) { clickUiView(); return }
+        val target = targetProvider() ?: return
         val (x, y) = targetCoords(target)
         Timber.d("Cursor: click at target ($x, $y)")
         dispatchHover()
@@ -609,6 +883,9 @@ class CursorController(
      * `test_cursor_context_menu_repeated_long_press_touch_stays_clean`.
      */
     private fun dispatchLongPress() {
+        // Over the browser's own UI a long press has no context-menu meaning: just activate the
+        // control under the cursor (the reliable way to drive the toolbar, see [clickUiView]).
+        if (isUiPoint()) { clickUiView(); return }
         val target = targetProvider() ?: return
         wakeCursor()
         val (x, y) = targetCoords(target)
@@ -775,6 +1052,8 @@ class CursorController(
 
     private fun showCursor() {
         if (shown) return
+        // Never reveal the cursor while a menu / dialog / sheet has it suspended.
+        if (suspended) return
         shown = true
         overlay.visibility = View.VISIBLE
         overlay.animate().alpha(1f).setDuration(FADE_ANIM_MS).start()
@@ -826,6 +1105,30 @@ class CursorController(
 
     /** Current cursor position (overlay-local). Exposed for tests / diagnostics. */
     val position: Pair<Float, Float> get() = posX to posY
+
+    /**
+     * Instantly place the cursor at [x], [y] (overlay-local) and dispatch a hover there.
+     *
+     * D-pad movement clamps the cursor at the overlay edges, and its per-press step is
+     * DPI-dependent (and subject to dropped key events over network adb), so a key-press count
+     * can't deterministically land the cursor over a specific control (e.g. a toolbar button that
+     * sits *near* — not at — the top edge) across devices. This gives the automated tests a
+     * device-independent way to put the cursor exactly over a control and then exercise the
+     * confirm key / hover against it. It is a pure positioning aid — it does not alter any of the
+     * real input paths (movement, click routing, etc.). The point is clamped to the overlay bounds
+     * so a stale size (while the overlay is faded out / GONE) can never place it off-screen.
+     */
+    fun setPosition(x: Float, y: Float) {
+        if (overlay.maxX > 0f) boundsX = overlay.maxX
+        if (overlay.maxY > 0f) boundsY = overlay.maxY
+        posX = x.coerceIn(0f, boundsX)
+        posY = y.coerceIn(0f, boundsY)
+        positioned = true
+        overlay.setPosition(posX, posY)
+        wakeCursor()
+        dispatchHover()
+        Timber.d("Cursor: teleported to ($posX, $posY)")
+    }
 
     companion object {
         val HOTKEY_LONG_PRESS_MS: Long =

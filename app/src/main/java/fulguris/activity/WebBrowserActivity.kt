@@ -14,6 +14,7 @@ import android.app.NotificationManager
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -256,6 +257,20 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
     // this activity only forwards input events and wires the overlay / menu / settings.
     private lateinit var iCursorController: CursorController
     private var iInputManager: InputManager? = null
+    // Debug-only: lets the automated cursor tests place the cursor at exact screen coordinates
+    // (a D-pad press count can't deterministically land on a specific control across devices —
+    // the per-press step is DPI-dependent and key events get dropped over network adb). See
+    // [iCursorTeleportReceiver]. Never registered in release builds.
+    private val iCursorTeleportReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (!BuildConfig.DEBUG) return
+            val x = intent.getFloatExtra("x", Float.NaN)
+            val y = intent.getFloatExtra("y", Float.NaN)
+            if (!x.isNaN() && !y.isNaN() && ::iCursorController.isInitialized) {
+                iCursorController.setPosition(x, y)
+            }
+        }
+    }
     // While an HTML5 video is fullscreen the cursor must dispatch into (and overlay) the fullscreen
     // custom view instead of the WebView. See onShowCustomView / onHideCustomView.
     private var iCursorTargetOverride: View? = null
@@ -433,6 +448,26 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         createCursorController()
         tabsDialog = BottomSheetDialog(this)
         bookmarksDialog = BottomSheetDialog(this)
+        // A bottom sheet steals window focus when it opens (which suspends the cursor via
+        // onWindowFocusChanged) but dismissing one does NOT reliably re-deliver
+        // onWindowFocusChanged(true) to this activity, so the cursor would stay suspended
+        // (dead) until the next app restart. The sheet's own close is the reliable "closed"
+        // signal, so resume from there. For iBottomSheet (a BottomSheetDialogFragment) we use
+        // its observers' onCancel, which fires when this cancelable dialog is fully dismissed
+        // (back at the root of its child back stack, outside tap, or a programmatic
+        // dismiss()); note a BACK that merely pops a child fragment does NOT close the sheet
+        // and correctly does not fire it. For the two plain BottomSheetDialogs we use
+        // Dialog.setOnDismissListener. This covers every iBottomSheet-based sheet (options,
+        // domain, page requests, history, console, cookies, downloads) and both dialogs.
+        iBottomSheet.observers.add { aSheet ->
+            if (::iCursorController.isInitialized) iCursorController.resumeCursor()
+        }
+        tabsDialog.setOnDismissListener {
+            if (::iCursorController.isInitialized) iCursorController.resumeCursor()
+        }
+        bookmarksDialog.setOnDismissListener {
+            if (::iCursorController.isInitialized) iCursorController.resumeCursor()
+        }
 
 
         if (isIncognito()) {
@@ -782,6 +817,16 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         iCursorController = CursorController(
             overlay = iBinding.cursorOverlay,
             targetProvider = { iCursorTargetOverride ?: currentTabView },
+            // The browser's own UI root: the cursor overlay spans the whole activity (toolbar
+            // included), so when the cursor point lies over this view (rather than over the web
+            // target) a click is dispatched through it, activating the control under the cursor
+            // (a toolbar button, the address field, the tab bar, a drawer…).
+            uiRootProvider = { iBinding.coordinatorLayout },
+            // The boundary between "web content" and "browser UI". This is the web content
+            // CONTAINER (below the toolbar), not the raw WebView: the WebView's layout can reach
+            // up behind the status bar, so testing against its own bounds would treat the toolbar
+            // as web content. In HTML5 fullscreen the override IS the (full-screen) custom view.
+            contentBoundsProvider = { iCursorTargetOverride ?: iBinding.webViewFrame },
             // The confirm key only clicks at the cursor while the web content holds input focus;
             // otherwise it is yielded to the focused control (a toolbar widget, the address field,
             // a menu…). In HTML5 fullscreen the tab is INVISIBLE (onShowCustomView), which strips
@@ -840,13 +885,13 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         iCursorTargetOverride = target
     }
 
-    /** Restore the cursor overlay to the web view frame and retarget dispatch to the WebView. */
+    /** Restore the cursor overlay to its home (the host FrameLayout at the top of the root layout) and retarget dispatch to the WebView. */
     private fun detachCursorOverlayFromFullscreen() {
         iCursorTargetOverride = null
         if (!::iBinding.isInitialized) return
         val overlay = iBinding.cursorOverlay
         (overlay.parent as? ViewGroup)?.removeView(overlay)
-        iBinding.webViewFrame.addView(overlay, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        iBinding.cursorOverlayHost.addView(overlay, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
     /**
@@ -3914,6 +3959,9 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         super.onStop()
         iInputManager?.unregisterInputDeviceListener(iInputDeviceListener)
         iInputManager = null
+        if (BuildConfig.DEBUG) {
+            try { unregisterReceiver(iCursorTeleportReceiver) } catch (_: Exception) { }
+        }
         // When in PiP and user dismisses the PiP window, onStop is called.
         // Make sure we pause the current tab then.
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N && !isInPictureInPictureMode) {
@@ -3960,6 +4008,15 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         // Track gamepad connect/disconnect so the Cursor menu item can appear/disappear live.
         iInputManager = (getSystemService(Context.INPUT_SERVICE) as? InputManager)?.also {
             it.registerInputDeviceListener(iInputDeviceListener, mainHandler)
+        }
+        if (BuildConfig.DEBUG) {
+            // Exported so the automated tests can drive it with `adb shell am broadcast` (the
+            // shell uid can't reach a NOT_EXPORTED receiver on API 34+). Debug-only, never shipped.
+            ContextCompat.registerReceiver(
+                this, iCursorTeleportReceiver,
+                IntentFilter("$packageName.action.cursor_test_teleport"),
+                ContextCompat.RECEIVER_EXPORTED
+            )
         }
     }
 
@@ -4927,6 +4984,16 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         Timber.d("onWindowFocusChanged")
         if (hasFocus) {
             setFullscreen(hideStatusBar, isImmersiveMode)
+        }
+        // Whenever one of the browser's overlays takes the window's focus — the main / sessions
+        // popup menus, a dialog, or a bottom sheet (settings, downloads, tabs, bookmarks, …) — the
+        // cursor is suspended: its overlay is hidden and every input event is yielded to the
+        // overlay's own focus navigation. When the activity regains focus (the overlay closed) the
+        // cursor is restored if it was on. Using window focus is what lets this one hook cover all
+        // of those overlays uniformly (a focusable popup / dialog / bottom sheet all steal window
+        // focus, and the soft keyboard does NOT, so editing the address field keeps the cursor).
+        if (::iCursorController.isInitialized) {
+            if (hasFocus) iCursorController.resumeCursor() else iCursorController.suspendCursor()
         }
     }
 

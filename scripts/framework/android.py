@@ -78,6 +78,9 @@ class AndroidDevice(Device):
     def type_text(self, text: str, wait: float = 0.5) -> None:
         adb.type_text(self.serial, text, wait)
 
+    def cursor_teleport(self, x: float, y: float, wait: float = 0.6) -> None:
+        adb.cursor_teleport(self.serial, self._package, x, y, wait)
+
     def clear_field(self) -> None:
         adb.clear_field(self.serial)
 

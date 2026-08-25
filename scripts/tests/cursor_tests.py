@@ -136,7 +136,7 @@ def _set_float_pref(xml: str, key: str, value: str) -> str:
     return pat.sub(entry, xml) if pat.search(xml) else xml.replace("</map>", f"    {entry}\n</map>")
 
 
-def _reset_cursor_prefs(device) -> None:
+def _reset_cursor_prefs(device, overrides: dict | None = None) -> None:
     """Force the cursor prefs to known test values (host-side rewrite of the prefs XML).
 
     Also disables the "Hide tool bar after" auto-hide timeout in the *configuration-scoped* prefs
@@ -145,15 +145,19 @@ def _reset_cursor_prefs(device) -> None:
     and make every test read an empty label. The toolbar-hide suite self-manages its own timeout
     per test, so resetting it to 0 here cannot collide. The app is stopped for both rewrites so it
     cannot overwrite the files on exit.
+
+    ``overrides`` lets a test re-apply with different values (e.g. fade timeout 0) on a device
+    already reset with the defaults — it forces a fresh rewrite of the main prefs.
     """
-    if device.id in _prefs_reset:
+    if device.id in _prefs_reset and not overrides:
         return
     _prefs_reset.add(device.id)
     # App must be stopped so it doesn't overwrite the files on exit and reloads our values next launch.
     device.force_stop()
     xml = device.read_prefs(_prefs_path(device.package))
     if "<map" in xml:
-        for key, val in _CURSOR_TEST_PREFS.items():
+        prefs = {**_CURSOR_TEST_PREFS, **(overrides or {})}
+        for key, val in prefs.items():
             xml = _set_float_pref(xml, key, str(val))
         device.write_prefs(_prefs_path(device.package), xml)
     else:
@@ -166,11 +170,15 @@ def _reset_cursor_prefs(device) -> None:
         device.write_prefs(_config_prefs_path(device.package, orientation), config_xml)
 
 
-def _load_page(device, page: str) -> None:
-    """Serve and open one of the assets pages, leaving the cursor OFF."""
+def _load_page(device, page: str, prefs: dict | None = None) -> None:
+    """Serve and open one of the assets pages, leaving the cursor OFF.
+
+    ``prefs`` optionally overrides the cursor test prefs (applied before the app reads them on
+    launch), e.g. a 0 fade timeout so the overlay stays laid out while shown.
+    """
     _ensure_server()
     _ensure_reverse(device)
-    _reset_cursor_prefs(device)
+    _reset_cursor_prefs(device, prefs)
     # Make sure we start from a clean, cursor-off state.
     if _overlay_present(device):
         _toggle(device)
@@ -238,6 +246,52 @@ def test_cursor_toggle_exit_focuses_menu_button(device, ctx: dict) -> None:
     # Turning the cursor off moves focus to the toolbar more/menu button for predictable D-pad nav.
     assert _focused_resource_id(device).endswith(":id/button_more"), \
         f"turning the cursor off should focus the menu button, focus was '{_focused_resource_id(device)}'"
+
+
+# The INTENT_OPEN_CONFIGURATION action opens the options bottom sheet (with the configuration
+# settings as its root child fragment) straight from the command line — the same path the user
+# hits from the menu, so this is a faithful, deterministic way to open + close the sheet.
+OPEN_CONFIGURATION_ACTION = "fulguris.action.OPEN_CONFIGURATION"
+
+
+def test_cursor_survives_options_sheet_dismiss(device, ctx: dict) -> None:
+    """Opening then dismissing the options bottom sheet must not leave the cursor suspended.
+
+    Regression: dismissing a BottomSheetDialogFragment steals the activity's window focus when it
+    opens (which suspends the cursor) but does NOT reliably re-deliver onWindowFocusChanged(true)
+    to the activity when it closes, so the cursor stayed suspended (dead) until the next app
+    restart. The activity now resumes the cursor from the sheet's own close (onCancel /
+    setOnDismissListener), which this test guards: the overlay (present only while the cursor is on
+    AND not suspended) must be back after the sheet is dismissed.
+    """
+    # Fade must be 0 so the shown-but-idle overlay stays laid out (present) and _overlay_present
+    # is a reliable "on and not suspended" signal rather than a fade race.
+    _load_page(device, "cursor_target.html", {"pref_key_cursor_fade_timeout": 0})
+    assert not _overlay_present(device), "cursor should start off"
+
+    _toggle(device)
+    assert _overlay_present(device), "the cursor should be on before the sheet"
+
+    # Open the options bottom sheet (adds the configuration child fragment to the back stack).
+    device.launch_action(OPEN_CONFIGURATION_ACTION, wait=2.5)
+    assert not _overlay_present(device), \
+        "the overlay should be suspended (hidden) while the bottom sheet is up"
+
+    # Dismiss: BACK #1 pops the configuration child fragment (sheet stays at root, still up);
+    # BACK #2 is at the root of the back stack, so the dialog cancels and closes.
+    device.key(keys.BACK, wait=1.5)
+    assert not _overlay_present(device), \
+        "the overlay should still be suspended while the sheet is still open at root"
+    device.key(keys.BACK, wait=1.5)
+
+    # The sheet is now fully dismissed: the cursor must have resumed, not stayed suspended.
+    assert _overlay_present(device), \
+        "the cursor should be resumed (overlay present) after the bottom sheet is dismissed"
+
+    # The cursor must actually be responsive again, not merely present: a click still lands.
+    coords = _click_coords(device)
+    assert coords is not None, "a click after the sheet dismiss should reach the page"
+    _toggle(device)
 
 
 # ===========================================================================
@@ -394,6 +448,41 @@ def test_cursor_click_hesitant_press_still_clicks(device, ctx: dict) -> None:
     assert re.fullmatch(r"\d+,\d+", title), \
         f"a 600 ms held select press is still a click and must land on the page, title was '{title}'"
     _toggle(device)
+
+
+def _field_center(device) -> tuple[int, int] | None:
+    """The on-screen center of the URL/address field (a toolbar control), or None."""
+    return device.field_center()
+
+
+def test_cursor_confirm_over_ui_activates_control_under_cursor(device, ctx: dict) -> None:
+    # Bug: with a toolbar widget holding input focus, pressing the confirm key (A / select) while
+    # the cursor was over a DIFFERENT toolbar control activated the *focused* widget instead of the
+    # control under the cursor. The confirm key over the browser UI must activate the control the
+    # cursor points at, regardless of which widget holds focus.
+    #
+    # The URL/address field is the target: it is a wide toolbar control sitting above the web
+    # content, and activating it has an unambiguous, readable effect — it gains input focus. After
+    # turning the cursor off focus lands on the toolbar menu button, so this yields
+    # cursor-over-address-field + focus-on-menu-button: if the confirm key went to the focused
+    # widget the address field would NOT focus, but it must (the cursor is on top of it).
+    _load_target(device)
+    _toggle(device)          # cursor on
+    _toggle(device)          # cursor off -> focus moves to button_more
+    assert _focused_resource_id(device).endswith(":id/button_more"), \
+        f"setup: focus should be on the toolbar menu button, was '{_focused_resource_id(device)}'"
+    _toggle(device)          # cursor on again; enabling does not move focus (stays on button_more)
+    assert _overlay_present(device), "the cursor should be on"
+    field_center = _field_center(device)
+    assert field_center is not None, "the URL/address field must be present in the toolbar"
+    # Place the cursor exactly over the address field (a D-pad press count can't do this
+    # deterministically across devices — the per-press step is DPI-dependent and key events get
+    # dropped over network adb).
+    device.cursor_teleport(*field_center)
+    device.key(keys.DPAD_CENTER, wait=1.2)  # the confirm key (A / DPAD center / ENTER)
+    assert device.field_focused(), (
+        "the confirm key with the cursor over the URL field must activate that field (the control "
+        "under the cursor), not the focused widget; the address field did not gain focus")
 
 
 def test_cursor_confirm_yields_to_focused_widget(device, ctx: dict) -> None:
@@ -657,6 +746,7 @@ FEATURE_GROUPS = {
     "cursor-toggle": [
         test_cursor_toggle_hotkey_shows_and_hides_overlay,
         test_cursor_toggle_exit_focuses_menu_button,
+        test_cursor_survives_options_sheet_dismiss,
     ],
     "cursor-movement": [
         test_cursor_movement_dpad_right_moves_right,
@@ -672,6 +762,7 @@ FEATURE_GROUPS = {
         test_cursor_click_activates_under_cursor,
         test_cursor_click_drag_target_seeks,
         test_cursor_click_hesitant_press_still_clicks,
+        test_cursor_confirm_over_ui_activates_control_under_cursor,
         test_cursor_confirm_yields_to_focused_widget,
     ],
     "cursor-menu": [
@@ -702,6 +793,7 @@ ALL_TESTS = [t for group in FEATURE_GROUPS.values() for t in group]
 TEST_DESCRIPTIONS = {
     "test_cursor_toggle_hotkey_shows_and_hides_overlay": "Long-press play/pause toggles the cursor overlay on and off",
     "test_cursor_toggle_exit_focuses_menu_button": "Turning the cursor off moves focus to the toolbar menu button",
+    "test_cursor_survives_options_sheet_dismiss": "Opening then dismissing the options bottom sheet does not leave the cursor suspended (resumes on sheet close)",
     "test_cursor_movement_dpad_right_moves_right": "D-pad right moves the cursor right (click X increases)",
     "test_cursor_movement_dpad_down_moves_down": "D-pad down moves the cursor down (click Y increases)",
     "test_cursor_movement_edge_scrolls_page": "Pushing past the bottom edge scrolls the page",
@@ -711,6 +803,7 @@ TEST_DESCRIPTIONS = {
     "test_cursor_click_activates_under_cursor": "Select press dispatches a click the page receives at the cursor",
     "test_cursor_click_drag_target_seeks": "A cursor click seeks a scrub bar via mousedown(mouse) or touch drag, like YouTube's timeline",
     "test_cursor_click_hesitant_press_still_clicks": "A realistically held (~600 ms) select press still clicks — only a deliberate ~1 s hold opens the context menu",
+    "test_cursor_confirm_over_ui_activates_control_under_cursor": "With the cursor over a toolbar control, the confirm key (A / select) activates the control under the cursor, not the widget holding focus",
     "test_cursor_confirm_yields_to_focused_widget": "With the cursor on but focus on a toolbar widget, the confirm key (A / select) activates the widget instead of clicking the page under the cursor",
     "test_cursor_menu_item_visible_on_leanback": "The Cursor main-menu item is shown on Android TV",
     "test_cursor_menu_item_toggles_mode": "Tapping the Cursor menu item turns the cursor on",
