@@ -488,3 +488,11 @@ tasks.withType(KotlinCompile).configureEach {
         freeCompilerArgs += ["-Xannotation-default-target=param-property"]
     }
 }
+
+afterEvaluate {
+    if (tasks.findByName("assembleDebug")) {
+        tasks.named("assembleDebug").configure {
+            setDependsOn([tasks.named("assembleSlionsFullAgentDebug")])
+        }
+    }
+}
