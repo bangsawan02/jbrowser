@@ -74,7 +74,6 @@
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.App.Black"
-        android:enableOnBackInvokedCallback="true"
         >
 
         <!--
@@ -368,6 +367,15 @@
             android:exported="false" />
 
         <activity
+            android:name="fulguris.settings.compose.SettingsComposeActivity"
+            android:colorMode="wideColorGamut"
+            android:resizeableActivity="true"
+            android:label="@string/settings"
+            android:parentActivityName="fulguris.activity.MainActivity"
+            android:theme="@style/Theme.App.DayNight"
+            android:exported="true" />
+
+        <activity
             android:name="fulguris.activity.SettingsActivity"
             android:colorMode="wideColorGamut"
             android:resizeableActivity="true"
@@ -419,7 +427,9 @@
                 android:resource="@xml/filepaths" />
         </provider>
 
-        <!-- Firebase analytics and crash reporting removed for privacy -->
+        <!-- Firebase configuration -->
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="@bool/pref_default_analytics" />
+        <meta-data android:name="firebase_crashlytics_collection_enabled" android:value="@bool/pref_default_crash_report" />
 
         <!-- We won't need this for now. We experimented with that as we were trying to open file explorer to a directory. -->
         <!--

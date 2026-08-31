@@ -27,10 +27,9 @@ import fulguris.BuildConfig
 import android.os.Bundle
 import androidx.preference.Preference
 import androidx.webkit.WebViewCompat
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.android.volley.*
+import com.android.volley.toolbox.JsonObjectRequest
+import com.android.volley.toolbox.Volley
 import org.json.JSONObject
 import android.content.Intent
 import android.net.Uri
@@ -89,7 +88,10 @@ class AboutSettingsFragment : AbstractSettingsFragment() {
 
     override fun providePreferencesXmlResource() = R.xml.preference_about
 
-
+    // Use lazy initialization to ensure queue is created only once per fragment instance
+    private val queue: RequestQueue by lazy {
+        Volley.newRequestQueue(requireContext().applicationContext)
+    }
 
     // Track whether we've already checked for updates in this fragment instance
     private var hasCheckedForUpdates = false
@@ -221,6 +223,8 @@ class AboutSettingsFragment : AbstractSettingsFragment() {
     override fun onStop() {
         Timber.d("$ihs: onStop")
         super.onStop()
+        // Cancel all pending requests when fragment is stopped
+        queue.cancelAll(this)
     }
 
     override fun onDestroyView() {
@@ -243,53 +247,57 @@ class AboutSettingsFragment : AbstractSettingsFragment() {
      */
     private fun checkForUpdates() {
         Timber.d("$ihs: checkForUpdates")
-        val urlString = getString(R.string.slions_update_check_url)
+        val url = getString(R.string.slions_update_check_url)
+        // Get API key while fragment is still attached, before network request executes
         val apiKey = getString(R.string.slions_api_key)
 
-        viewLifecycleOwner.lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val url = java.net.URL(urlString)
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.requestMethod = "GET"
-                conn.setRequestProperty("XF-Api-Key", apiKey)
-                conn.connectTimeout = 10000
-                conn.readTimeout = 10000
-                if (conn.responseCode == 200) {
-                    val text = conn.inputStream.bufferedReader().use { it.readText() }
-                    val response = JSONObject(text)
-                    val latestVersion = response.getJSONArray("versions").getJSONObject(0).getString("version_string")
-                    withContext(Dispatchers.Main) {
-                        if (isAdded) {
-                            findPreference<Preference>(SETTINGS_VERSION)?.apply {
-                                if (latestVersion == BuildConfig.VERSION_NAME) {
-                                    title = getString(R.string.up_to_date)
-                                } else {
-                                    title = getString(R.string.update_available) + " - v" + latestVersion
-                                }
-                            }
+        // Request a JSON object response from the provided URL.
+        val request = object: JsonObjectRequest(Request.Method.GET,url,null,
+                Response.Listener<JSONObject> { response ->
+                    // Check if fragment is still attached before accessing context
+                    // Could be the case if the fragment has been detached during network request
+                    if (!isAdded) return@Listener
+
+                    findPreference<Preference>(SETTINGS_VERSION)?.apply {
+                        // Fetch latest version from JSON by parsing XenForo answer
+                        val latestVersion = response.getJSONArray("versions").getJSONObject(0).getString("version_string")
+                        if ( latestVersion == BuildConfig.VERSION_NAME) {
+                            title = getString(R.string.up_to_date)
+                        }
+                        else {
+                            title = getString(R.string.update_available) + " - v" + latestVersion
                         }
                     }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        if (isAdded) {
-                            findPreference<Preference>(SETTINGS_VERSION)?.apply {
-                                title = getString(R.string.update_check_error)
-                                summary = versionString + "\nHttp Error " + conn.responseCode
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    if (isAdded) {
-                        findPreference<Preference>(SETTINGS_VERSION)?.apply {
-                            title = getString(R.string.update_check_error)
-                            summary = versionString + "\n" + (e.message ?: "Unknown error")
-                        }
+
+                    //Log.d(TAG,response.toString())
+                },
+                Response.ErrorListener {error: VolleyError ->
+                    // Check if fragment is still attached before accessing context
+                    // Could be the case if the fragment has been detached during network request
+                    if (!isAdded) return@ErrorListener
+
+                    findPreference<Preference>(SETTINGS_VERSION)?.apply {
+                        title = getString(R.string.update_check_error)
+                        summary = versionString + "\n" + error.cause.toString() + error.networkResponse?.let{"(" + it.statusCode.toString() + ")"}
+                        // Use the following for network status code
+                        // Though networkResponse can be null in flight mode for instance
+                        // error.networkResponse.statusCode.toString()
                     }
                 }
+        ){
+            @Throws(AuthFailureError::class)
+            override fun getHeaders(): Map<String, String> {
+                val params: MutableMap<String, String> = HashMap()
+                // Use pre-fetched API key to avoid accessing context on background thread
+                params["XF-Api-Key"] = apiKey
+                return params
             }
         }
+
+        // Tag request with fragment instance to ensure proper cancellation
+        request.tag = this
+        // Add the request to the RequestQueue.
+        queue.add(request)
     }
 
 

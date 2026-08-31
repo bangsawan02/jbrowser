@@ -30,7 +30,6 @@ import fulguris.settings.preferences.DeveloperPreferences
 import fulguris.settings.preferences.LandscapePreferences
 import fulguris.settings.preferences.PortraitPreferences
 import fulguris.settings.preferences.UserPreferences
-import fulguris.utils.installMultiDex
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Application
@@ -39,7 +38,6 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.Bundle
 import android.webkit.WebView
-import com.jakewharton.threetenabp.AndroidThreeTen
 import dagger.hilt.android.HiltAndroidApp
 import fulguris.settings.Config
 import fulguris.settings.preferences.ConfigurationPreferences
@@ -92,13 +90,6 @@ class App : Application(), SharedPreferences.OnSharedPreferenceChangeListener,
 
     override fun attachBaseContext(base: Context) {
         super.attachBaseContext(base)
-        // We only need to install that multi DEX library when not doing minify code optimization, typically in debug, and on devices below API level 21.
-        // In fact from API level 21 and above Android Runtime (ART) is used rather than deprecated Dalvik.
-        // Since ART has multi DEX support built-in we don't need to install that DEX library from API level 21 and above.
-        // See: https://github.com/Slion/Fulguris/issues/116
-        if (BuildConfig.DEBUG && Build.VERSION.SDK_INT < 21) {
-            installMultiDex(context = base)
-        }
     }
 
 
@@ -129,12 +120,6 @@ class App : Application(), SharedPreferences.OnSharedPreferenceChangeListener,
 
     override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
         Timber.v("onActivityCreated")
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            if (activity is IncognitoActivity) {
-                // Needed as the process check we use below does not work before Android 9
-                incognito = true
-            }
-        }
     }
 
     override fun onActivityStarted(activity: Activity) {
@@ -171,6 +156,7 @@ class App : Application(), SharedPreferences.OnSharedPreferenceChangeListener,
     override fun onCreate() {
         app = this
         registerActivityLifecycleCallbacks(this)
+        com.google.android.material.color.DynamicColors.applyToActivitiesIfAvailable(this)
         // SL: Use this to debug when launched from another app for instance
         //Debug.waitForDebugger()
         super.onCreate()
@@ -179,8 +165,6 @@ class App : Application(), SharedPreferences.OnSharedPreferenceChangeListener,
 
         plantTimberLogs()
         Timber.v("onCreate")
-
-        AndroidThreeTen.init(this);
 
         if (BuildConfig.DEBUG) {
             /*

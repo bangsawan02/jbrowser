@@ -1,8 +1,7 @@
 package fulguris.utils
 
 import android.content.Context
-import android.graphics.Point
-import android.util.DisplayMetrics
+import android.os.Build
 import android.view.WindowManager
 
 /**
@@ -18,10 +17,12 @@ object DeviceUtils {
     @JvmStatic
     fun getScreenWidth(context: Context): Int {
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-
-        return Point().apply {
-            windowManager.defaultDisplay.getSize(this)
-        }.x
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            windowManager.currentWindowMetrics.bounds.width()
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.width
+        }
     }
 
     /**
@@ -32,10 +33,12 @@ object DeviceUtils {
     @JvmStatic
     fun getAvailableScreenWidth(context: Context): Int {
         val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-
-        return DisplayMetrics().apply {
-            windowManager.defaultDisplay.getRealMetrics(this)
-        }.widthPixels
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            windowManager.currentWindowMetrics.bounds.width()
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.width
+        }
     }
 
 }

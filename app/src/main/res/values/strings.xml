@@ -180,7 +180,6 @@
     <string name="action_find_selection">Find selection</string>
     <string name="action_print">Print</string>
     <string name="action_translate">Translate</string>
-    <string name="action_eruda_devtools">DevTools (Eruda)</string>
     <string name="downloads">Downloads</string>
     <string name="downloads_notification_description">Triggers upon download completion</string>
     <string name="download_pending">Downloading:</string>

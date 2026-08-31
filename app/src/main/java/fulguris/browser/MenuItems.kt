@@ -262,15 +262,6 @@ object MenuItems {
             canBeInTabMenu = true,
             defaultMenu = MenuType.TabMenu
         ),
-        MenuItemId.ErudaDevTools to MenuItem(
-            id = MenuItemId.ErudaDevTools,
-            labelId = R.string.action_eruda_devtools,
-            iconId = R.drawable.ic_terminal_outline,
-            viewId = R.id.menuItemErudaDevTools,
-            canBeInMainMenu = true,
-            canBeInTabMenu = true,
-            defaultMenu = MenuType.TabMenu
-        ),
         MenuItemId.Requests to MenuItem(
             id = MenuItemId.Requests,
             labelId = R.string.action_page_requests,

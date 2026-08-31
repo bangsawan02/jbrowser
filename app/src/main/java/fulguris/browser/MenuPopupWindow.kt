@@ -278,7 +278,6 @@ class MenuPopupWindow : PopupWindow {
         iBinding.menuItemLaunchApp.isVisible = false
         iBinding.menuItemPip.isVisible = false
         iBinding.menuItemCursor.isVisible = false
-        iBinding.menuItemErudaDevTools.isVisible = false
         iBinding.menuItemFullMenu.isVisible = false
     }
 
@@ -322,7 +321,6 @@ class MenuPopupWindow : PopupWindow {
             MenuItemId.LaunchApp -> iBinding.menuItemLaunchApp.isVisible = true
             MenuItemId.Pip -> iBinding.menuItemPip.isVisible = true
             MenuItemId.Cursor -> iBinding.menuItemCursor.isVisible = true
-            MenuItemId.ErudaDevTools -> iBinding.menuItemErudaDevTools.isVisible = true
             MenuItemId.FullMenu -> iBinding.menuItemFullMenu.isVisible = true
         }
     }
@@ -384,11 +382,6 @@ class MenuPopupWindow : PopupWindow {
                 // Handle LaunchApp visibility and icon only if it's in the current menu
                 if (iBinding.menuItemLaunchApp.isVisible) {
                     updateLaunchAppMenuItem(tab.url)
-                }
-
-                // Hide PiP on devices that don't support it (requires API 26)
-                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.O) {
-                    iBinding.menuItemPip.isVisible = false
                 }
 
                 // The cursor only makes sense on Android TV or when a gamepad / joystick / D-pad

@@ -52,8 +52,7 @@ class TabsManager @Inject constructor(
     private val downloadPageInitializer: DownloadPageInitializer,
     private val noOpPageInitializer: NoOpInitializer,
     private val userPreferences: UserPreferences,
-    private val sessionsManager: SessionsManager,
-    private val tabHibernationManager: fulguris.tab.TabHibernationManager
+    private val sessionsManager: SessionsManager
 ): Component() {
 
     private val tabList = arrayListOf<WebPageTab>()
@@ -857,25 +856,6 @@ class TabsManager @Inject constructor(
         iWebBrowser.updateSslState(aTab.currentSslState() ?: SslState.None)
 
         currentTabFromPresenter = aTab
-        checkAndHibernateTabs()
-    }
-
-    private fun checkAndHibernateTabs() {
-        if (tabHibernationManager.isMemoryLow() && tabList.size > 2) {
-            val maxActive = tabHibernationManager.getMaxActiveTabs()
-            var activeCount = 0
-            for (tab in tabList.reversed()) {
-                if (tab == currentTab) continue
-                if (activeCount >= maxActive) {
-                    if (tab.webView != null && !tab.isForeground) {
-                        Timber.d("Hibernating tab due to memory pressure: ${tab.url}")
-                        tab.freeze()
-                    }
-                } else {
-                    activeCount++
-                }
-            }
-        }
     }
 
     /**

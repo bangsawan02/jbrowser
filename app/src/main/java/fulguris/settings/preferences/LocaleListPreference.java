@@ -13,6 +13,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.os.AsyncTask;
 import androidx.preference.ListPreference;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -35,10 +36,6 @@ import java.util.Set;
 import fulguris.locale.LocaleUtils;
 import kotlin.Pair;
 import timber.log.Timber;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import android.os.Handler;
-import android.os.Looper;
 
 /**
  * Taken from GeckoLocaleList.
@@ -153,6 +150,7 @@ public class LocaleListPreference extends ListPreference {
 
     private volatile Locale entriesLocale;
     private CharacterValidator characterValidator;
+    private BuildLocaleListTask buildLocaleListTask;
 
     public LocaleListPreference(Context context) {
         this(context, null);
@@ -187,9 +185,6 @@ public class LocaleListPreference extends ListPreference {
         initializeLocaleList();
     }
 
-    private ExecutorService executor = Executors.newSingleThreadExecutor();
-    private Handler mainHandler = new Handler(Looper.getMainLooper());
-
     private void initializeLocaleList() {
         final Locale currentLocale = Locale.getDefault();
         Timber.d("Building locales list. Current locale: " + currentLocale);
@@ -202,57 +197,16 @@ public class LocaleListPreference extends ListPreference {
         this.entriesLocale = currentLocale;
 
         String defaultLanguage = getContext().getString(R.string.language_system_default);
-        final Collection<String> shippingLocales = LocaleUtils.getPackagedLocaleTags(getContext());
-        final CharacterValidator validator = characterValidator;
-        final WeakReference<LocaleListPreference> weakRef = new WeakReference<>(this);
-
-        executor.execute(() -> {
-            final int initialCount = shippingLocales.size();
-            final Set<LocaleDescriptor> locales = new HashSet<>(initialCount);
-            for (String tag : shippingLocales) {
-                final LocaleDescriptor descriptor = new LocaleDescriptor(tag);
-                if (!descriptor.isUsable(validator)) {
-                    Timber.w("Skipping locale " + tag + " on this device.");
-                    continue;
-                }
-                locales.add(descriptor);
-            }
-            final int usableCount = locales.size();
-            final LocaleDescriptor[] descriptors = locales.toArray(new LocaleDescriptor[usableCount]);
-            Arrays.sort(descriptors, 0, usableCount);
-
-            final int count = descriptors.length;
-            final String[] entries = new String[count + 1];
-            final String[] values = new String[count + 1];
-
-            entries[0] = defaultLanguage;
-            values[0] = "";
-
-            for (int i = 0; i < count; ++i) {
-                final String displayName = descriptors[i].getDisplayName();
-                final String tag = descriptors[i].getTag();
-                entries[i + 1] = displayName;
-                values[i + 1] = tag;
-            }
-
-            mainHandler.post(() -> {
-                LocaleListPreference pref = weakRef.get();
-                if (pref != null) {
-                    pref.setEntries(entries);
-                    pref.setEntryValues(values);
-                    if (pref.entriesListener != null) {
-                        pref.entriesListener.onEntriesSet();
-                    }
-                }
-            });
-        });
+        this.buildLocaleListTask = new BuildLocaleListTask(this, defaultLanguage,
+                characterValidator, LocaleUtils.getPackagedLocaleTags(getContext()));
+        this.buildLocaleListTask.execute();
     }
 
     @Override
     protected void onPrepareForRemoval() {
         super.onPrepareForRemoval();
-        if (executor != null && !executor.isShutdown()) {
-            executor.shutdownNow();
+        if (buildLocaleListTask != null) {
+            buildLocaleListTask.cancel(true);
         }
         if (entriesListener != null) {
             entriesListener = null;
@@ -408,4 +362,81 @@ public class LocaleListPreference extends ListPreference {
         return new LocaleDescriptor(value).getDisplayName();
     }
 
+    static final class BuildLocaleListTask extends AsyncTask<Void, Void, Pair<String[], String[]>> {
+
+        private final WeakReference<LocaleListPreference> weakListPreference;
+        private final CharacterValidator characterValidator;
+        private final Collection<String> shippingLocales;
+        private final String systemDefaultLanguage;
+
+        BuildLocaleListTask(LocaleListPreference listPreference, String systemDefaultLanguage,
+                            CharacterValidator characterValidator, Collection<String> shippingLocales) {
+            this.characterValidator = characterValidator;
+            this.shippingLocales = shippingLocales;
+            this.systemDefaultLanguage = systemDefaultLanguage;
+            this.weakListPreference = new WeakReference<>(listPreference);
+        }
+
+        @Override
+        protected Pair<String[], String[]> doInBackground(Void... voids) {
+            final LocaleDescriptor[] descriptors = getUsableLocales();
+            final int count = descriptors.length;
+
+            // We leave room for "System default".
+            final String[] entries = new String[count + 1];
+            final String[] values = new String[count + 1];
+
+            entries[0] = systemDefaultLanguage;
+            values[0] = "";
+
+            for (int i = 0; i < count; ++i) {
+                final String displayName = descriptors[i].getDisplayName();
+                final String tag = descriptors[i].getTag();
+                Timber.v(displayName + " => " + tag);
+                entries[i + 1] = displayName;
+                values[i + 1] = tag;
+            }
+            return new Pair<>(entries, values);
+        }
+
+        /**
+         * Not every locale we ship can be used on every device, due to
+         * font or rendering constraints.
+         * <p>
+         * This method filters down the list before generating the descriptor array.
+         */
+        private LocaleDescriptor[] getUsableLocales() {
+            final int initialCount = shippingLocales.size();
+            final Set<LocaleDescriptor> locales = new HashSet<>(initialCount);
+            for (String tag : shippingLocales) {
+                final LocaleDescriptor descriptor = new LocaleDescriptor(tag);
+                if (!descriptor.isUsable(this.characterValidator)) {
+                    Timber.w("Skipping locale " + tag + " on this device.");
+                    continue;
+                }
+
+                locales.add(descriptor);
+            }
+            final int usableCount = locales.size();
+            final LocaleDescriptor[] descriptors = locales.toArray(new LocaleDescriptor[usableCount]);
+            Arrays.sort(descriptors, 0, usableCount);
+            return descriptors;
+        }
+
+        @Override
+        protected void onPostExecute(Pair<String[], String[]> pair) {
+            if (isCancelled()) {
+                return;
+            }
+
+            final LocaleListPreference preference = weakListPreference.get();
+            if (preference != null) {
+                preference.setEntries(pair.getFirst());
+                preference.setEntryValues(pair.getSecond());
+                if (preference.entriesListener != null) {
+                    preference.entriesListener.onEntriesSet();
+                }
+            }
+        }
+    }
 }

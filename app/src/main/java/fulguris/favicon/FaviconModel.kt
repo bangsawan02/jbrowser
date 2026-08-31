@@ -20,8 +20,6 @@ import androidx.core.net.toUri
 import androidx.palette.graphics.Palette
 import io.reactivex.Completable
 import io.reactivex.Maybe
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
 import java.io.FileOutputStream
@@ -115,34 +113,6 @@ class FaviconModel @Inject constructor(
         }
 
         return@create it.onSuccess(createDefaultBitmapForTitle(title).pad())
-    }
-
-    /**
-     * Coroutines version of faviconForUrl using Dispatchers.IO.
-     */
-    suspend fun getFavicon(url: String, title: String, aOnDark: Boolean): Bitmap = withContext(Dispatchers.IO) {
-        val uri = url.toUri().toValidUri()
-            ?: return@withContext createDefaultBitmapForTitle(title).pad()
-
-        val cachedFavicon = getFaviconFromMemCache(url)
-        if (cachedFavicon != null) {
-            return@withContext cachedFavicon.pad()
-        }
-
-        var faviconCacheFile = getFaviconCacheFile(application, uri, aOnDark)
-        if (!faviconCacheFile.exists() && aOnDark) {
-            faviconCacheFile = getFaviconCacheFile(application, uri, false)
-        }
-
-        if (faviconCacheFile.exists()) {
-            val storedFavicon = BitmapFactory.decodeFile(faviconCacheFile.path, loaderOptions)
-            if (storedFavicon != null) {
-                addFaviconToMemCache(url, storedFavicon)
-                return@withContext storedFavicon.pad()
-            }
-        }
-
-        return@withContext createDefaultBitmapForTitle(title).pad()
     }
 
     /**

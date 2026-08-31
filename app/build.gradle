@@ -26,15 +26,28 @@ plugins {
     id 'com.android.application'
     id 'kotlin-android'
     id 'dagger.hilt.android.plugin'
-    // id 'kotlin-kapt' - Replaced with KSP for faster compilation
     id 'jacoco'
     id 'com.github.ben-manes.versions'
     id 'de.mobilej.unmock'
     id 'com.google.devtools.ksp'
-    id("com.anthonycr.plugins.mezzanine") version "2.1.0"
 }
 
-// Firebase removed: analytics and crash reporting disabled for privacy
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
+
+// See: https://stackoverflow.com/a/53408667/3969362
+// Conditionally apply Firebase Google Plugins to flavors that needs it
+android.productFlavors.all { flavor ->
+    if (getGradle().getStartParameter().getTaskRequests().toString().toLowerCase().contains(flavor.name)) {
+        // Only download and playstore flavor need Firebase
+        if (flavor.name == "download" || flavor.name == "playstore") {
+            println("Building flavor with Firebase [${flavor.name}] - applying plugin")
+            // Google Services Gradle plugin
+            apply plugin: 'com.google.gms.google-services'
+            // Apply the Crashlytics Gradle plugin
+            apply plugin: 'com.google.firebase.crashlytics'
+        }
+    }
+}
 
 // TODO: Find a way to put it the variant/type folder such as: generated/source/locale/slionsFullDownload/debug/acr/browser/lightning/locale
 def generatedLocaleListDir = layout.buildDirectory.dir('generated/source/locale/fulguris/locale')
@@ -46,8 +59,12 @@ android {
 
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInteger()
-        targetSdk = libs.versions.compileSdk.get().toInteger()
+        targetSdk = 34
         vectorDrawables.useSupportLibrary = true
+    }
+
+    aaptOptions {
+        cruncherEnabled = false
     }
 
     sourceSets {
@@ -61,9 +78,6 @@ android {
     buildTypes {
         debug {
             debuggable = true
-            // See: https://github.com/Slion/Fulguris/issues/116
-            // If we disable minify then we need multi DEX.
-            multiDexEnabled = true
             minifyEnabled = false
             shrinkResources = false
             proguardFiles getDefaultProguardFile(
@@ -76,25 +90,22 @@ android {
 
         release {
             debuggable = false
-            multiDexEnabled = true
+            multiDexEnabled = true // Required for core library desugaring
+            // If you disable minify you need to make sure multi DEX library is loaded in release or you will get crashed on Android 5 devices and below
             minifyEnabled = true
             shrinkResources = true
             proguardFiles getDefaultProguardFile(
                     'proguard-android-optimize.txt'),
                     'proguard-project.txt'
+            // Use debug signing for now
+            //signingConfig debug.signingConfig
+
+            ndk {
+                //abiFilters "arm64-v8a", "armeabi-v7a", "armeabi", "mips"
+            }
             enableUnitTestCoverage = false
             enableAndroidTestCoverage = false
         }
-    }
-
-    lintOptions {
-        checkReleaseBuilds = false
-        abortOnError = false
-        ignoreWarnings = true
-    }
-
-    aaptOptions {
-        cruncherEnabled = false
     }
 
     testOptions {
@@ -167,7 +178,6 @@ android {
 
         download {
             dimension "PUBLISHER"
-            isDefault = true
             applicationIdSuffix ".download"
             buildConfigField "fulguris.Sponsorship", "SPONSORSHIP", "fulguris.Sponsorship.BRONZE"
         }
@@ -187,6 +197,7 @@ android {
         // the Firebase plugins. See docs/features/agent-variant.md.
         agent {
             dimension "PUBLISHER"
+            isDefault = true
             applicationIdSuffix ".agent"
             buildConfigField "fulguris.Sponsorship", "SPONSORSHIP", "fulguris.Sponsorship.BRONZE"
         }
@@ -241,9 +252,9 @@ android {
 
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_21
-        targetCompatibility JavaVersion.VERSION_21
-        coreLibraryDesugaringEnabled = true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
     }
 
     buildFeatures {
@@ -251,6 +262,7 @@ android {
         dataBinding = true
         // We notably use build config to define our sponsorships
         buildConfig = true
+        compose = true
     }
     lint {
         abortOnError = true
@@ -269,11 +281,6 @@ unMock {
 }
 
 dependencies {
-    // Multi DEX is needed for core library desugaring and when minify is disabled
-    // See [BrowserApp.attachBaseContext]
-    // See: https://github.com/Slion/Fulguris/issues/116
-    implementation libs.androidx.multidex
-
     // Core library desugaring for Sora Editor TextMate support
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 
@@ -286,15 +293,27 @@ dependencies {
     }
     testImplementation 'org.robolectric:robolectric:4.4'
 
+    // Compose
+    def composeBom = platform(libs.compose.bom)
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.navigation.compose)
+
     // Jetpack AndroidX libraries
     implementation libs.androidx.palette.ktx
     implementation libs.androidx.annotation
     implementation libs.androidx.vectordrawable.animated
     implementation libs.androidx.appcompat
-    implementation libs.androidx.recyclerview.v140
+    implementation libs.androidx.recyclerview
     implementation libs.androidx.swiperefreshlayout
     // Needs to upgrade target SDK
-    implementation libs.androidx.core.ktx.v1160
+    implementation libs.androidx.core.ktx
     implementation libs.androidx.core.splashscreen
     implementation libs.androidx.constraintlayout
     implementation libs.androidx.fragment
@@ -318,6 +337,7 @@ dependencies {
     implementation project(path: ":Preference")
     //implementation project(path: ":Preference", configuration: "release")
 
+    // AppIntro library removed
 
     // Play Store billing
     playstoreImplementation 'com.android.billingclient:billing:7.1.1'
@@ -334,17 +354,9 @@ dependencies {
     implementation 'io.github.Rosemoe.sora-editor:language-textmate'
 
     // Built-in files support
-    implementation(libs.mezzanine.core)
-    ksp(libs.mezzanine.processor)
+    // (Managed directly via AppModule asset loaders)
 
-    // Just using the local JAR won't work as is since the compiler has other unresolved dependencies
-    // We notably get java.lang.ClassNotFoundException: org.apache.commons.lang3.StringEscapeUtils when compiling
-    // See: https://stackoverflow.com/questions/28504174/noclassdeffounderror-org-apache-commons-lang3-stringutils
-    // Those dependencies are defined in the POM XML of the mezzanine-compiler package
-    //implementation files("libs/mezzanine-${mezzanineVersion}.jar")
-    //kapt files("libs/mezzanine-compiler-${mezzanineVersion}.jar")
-
-    // dependency injection (using KSP for fast builds)
+    // dependency injection
     implementation "com.google.dagger:dagger:$daggerVersion"
     ksp "com.google.dagger:dagger-compiler:$daggerVersion"
     implementation "com.google.dagger:hilt-android:$daggerVersion"
@@ -363,17 +375,17 @@ dependencies {
     // memory leak analysis
     debugImplementation 'com.squareup.leakcanary:leakcanary-android:2.13'
 
-    // Kotlin
-    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlinVersion"
-    //implementation "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion"
+    // Firebase
+    // Recommended: Add the Firebase SDK for Google Analytics.
+    playstoreImplementation 'com.google.firebase:firebase-analytics:21.6.1'
+    downloadImplementation 'com.google.firebase:firebase-analytics:21.6.1'
+    // Add the Firebase SDK for Crashlytics.
+    playstoreImplementation 'com.google.firebase:firebase-crashlytics:18.6.3'
+    downloadImplementation 'com.google.firebase:firebase-crashlytics:18.6.3'
 
-    // Firebase removed: analytics and crash reporting removed for privacy
 
-
-
-    // Since java.time need API 26 we use that backport instead
-    // See: https://github.com/JakeWharton/ThreeTenABP
-    implementation libs.threetenabp
+    // HTTP
+    implementation libs.volley
 
     // Logs
     implementation libs.timber
@@ -462,37 +474,12 @@ clean.doLast {
     file(generatedLocaleListDir).deleteDir()
 }
 
-mezzanine {
-    files = files(
-            "src/main/js/TextReflow.js",
-            "src/main/html/list.html",
-            "src/main/html/bookmarks.html",
-            "src/main/html/homepage.html",
-            "src/main/html/private.html",
-            "src/main/js/InvertPage.js",
-            "src/main/js/SetMetaViewport.js",
-            "src/main/js/ThemeColor.js",
-            "src/main/js/NestedScrollDetect.js",
-            "src/main/js/BlobDownload.js",
-            "src/main/js/BlobHook.js"
-    )
+afterEvaluate {
+    tasks.matching { it.name == "assembleDebug" }.configureEach {
+        setDependsOn([tasks.named("assembleSlionsFullAgentDebug")])
+    }
 }
-
 
 kotlin {
-    jvmToolchain(21)
-}
-
-tasks.withType(KotlinCompile).configureEach {
-    kotlinOptions {
-        freeCompilerArgs += ["-Xannotation-default-target=param-property"]
-    }
-}
-
-afterEvaluate {
-    if (tasks.findByName("assembleDebug")) {
-        tasks.named("assembleDebug").configure {
-            setDependsOn([tasks.named("assembleSlionsFullAgentDebug")])
-        }
-    }
+    jvmToolchain(17)
 }

@@ -60,6 +60,5 @@ enum class MenuItemId {
     Pip,
     LaunchApp,
     Cursor,
-    ErudaDevTools,
     FullMenu,
 }

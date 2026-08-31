@@ -254,29 +254,19 @@ public final class Utils {
 
         final String title = TextUtils.isEmpty(historyEntry.getTitle()) ? activity.getString(R.string.untitled) : historyEntry.getTitle();
 
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            Intent addIntent = new Intent();
-            addIntent.putExtra(Intent.EXTRA_SHORTCUT_INTENT, shortcutIntent);
-            addIntent.putExtra(Intent.EXTRA_SHORTCUT_NAME, title);
-            addIntent.putExtra(Intent.EXTRA_SHORTCUT_ICON, favicon);
-            addIntent.setAction("com.android.launcher.action.INSTALL_SHORTCUT");
-            activity.sendBroadcast(addIntent);
-            ActivityExtensions.snackbar(activity, R.string.message_added_to_homescreen,Gravity.BOTTOM);
-        } else {
-            ShortcutManager shortcutManager = activity.getSystemService(ShortcutManager.class);
-            if (shortcutManager.isRequestPinShortcutSupported()) {
-                ShortcutInfo pinShortcutInfo =
-                    new ShortcutInfo.Builder(activity, "browser-shortcut-" + historyEntry.getUrl().hashCode())
-                        .setIntent(shortcutIntent)
-                        .setIcon(Icon.createWithBitmap(favicon))
-                        .setShortLabel(title)
-                        .build();
+        ShortcutManager shortcutManager = activity.getSystemService(ShortcutManager.class);
+        if (shortcutManager != null && shortcutManager.isRequestPinShortcutSupported()) {
+            ShortcutInfo pinShortcutInfo =
+                new ShortcutInfo.Builder(activity, "browser-shortcut-" + historyEntry.getUrl().hashCode())
+                    .setIntent(shortcutIntent)
+                    .setIcon(Icon.createWithBitmap(favicon))
+                    .setShortLabel(title)
+                    .build();
 
-                shortcutManager.requestPinShortcut(pinShortcutInfo, null);
-                ActivityExtensions.snackbar(activity, R.string.message_added_to_homescreen, Gravity.BOTTOM);
-            } else {
-                ActivityExtensions.snackbar(activity, R.string.shortcut_message_failed_to_add,Gravity.BOTTOM);
-            }
+            shortcutManager.requestPinShortcut(pinShortcutInfo, null);
+            ActivityExtensions.snackbar(activity, R.string.message_added_to_homescreen, Gravity.BOTTOM);
+        } else {
+            ActivityExtensions.snackbar(activity, R.string.shortcut_message_failed_to_add, Gravity.BOTTOM);
         }
     }
 

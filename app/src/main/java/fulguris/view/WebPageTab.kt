@@ -511,10 +511,6 @@ class WebPageTab(
 
             isFocusableInTouchMode = true
             isFocusable = true
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-                isAnimationCacheEnabled = false
-                isAlwaysDrawnWithCacheEnabled = false
-            }
 
             // Some web sites are broken if the background color is not white, thanks bbc.com and bbc.com/news for not defining background color.
             // However whatever we set here should be irrelevant as this is being taken care of in [BrowserActivity.changeToolbarBackground]
@@ -679,10 +675,7 @@ class WebPageTab(
         // Don't just do the following as that's not taking desktop mode into account
         //setUserAgentForPreference(userPreferences)
 
-        @Suppress("DEPRECATION")
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            settings.saveFormData = userPreferences.savePasswordsEnabled && !isIncognito
-        }
+        settings.saveFormData = userPreferences.savePasswordsEnabled && !isIncognito
 
         if (defaultDomainSettings.javaScriptEnabled) {
             settings.javaScriptEnabled = true
@@ -733,54 +726,54 @@ class WebPageTab(
     private fun applyDarkMode() {
         val settings = webView?.settings ?: return
 
-        // API 33+ (Android 13+): Use algorithmic darkening (modern, non-deprecated API)
-        // Older APIs: Fall back to the deprecated FORCE_DARK API
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
-            val shouldDarken = (activity as ThemedActivity).isDarkTheme() || darkMode
-            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, shouldDarken)
-        } else {
-            @Suppress("DEPRECATION")
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK) &&
-                // and we are in dark theme or forced dark mode
-                ((activity as ThemedActivity).isDarkTheme() || darkMode)) {
-                @Suppress("DEPRECATION")
-                if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
-                    if (darkMode) {
-                        // User requested forced dark mode from menu, we need to enable user agent dark mode then.
-                        @Suppress("DEPRECATION")
-                        WebSettingsCompat.setForceDarkStrategy(
-                            settings,
-                            WebSettingsCompat.DARK_STRATEGY_PREFER_WEB_THEME_OVER_USER_AGENT_DARKENING
-                        )
-                    } else {
-                        // We are in app dark theme but this page does not forces to dark mode
-                        // Just request dark web theme then.
-                        @Suppress("DEPRECATION")
-                        WebSettingsCompat.setForceDarkStrategy(
-                            settings,
-                            WebSettingsCompat.DARK_STRATEGY_WEB_THEME_DARKENING_ONLY
-                        )
-                    }
-                }
+        // We needed to add this for force dark mode to work when targeting SDK>=33
+        // See: https://developer.android.com/about/versions/13/behavior-changes-13#webview-color-theme
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            // For forced dark mode to work on website that do not provide a dark theme we need to enable this
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, darkMode)
+        }
 
-                // We are either in app dark theme or forced dark mode, just request dark theme without actually forcing it.
-                @Suppress("DEPRECATION")
-                WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_ON)
-            } else {
-                @Suppress("DEPRECATION")
-                if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-                    // We are in app light theme and force dark mode is disabled therefore:
-                    @Suppress("DEPRECATION")
-                    WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF)
+        // If forced dark mode is supported
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK) &&
+            // and we are in dark theme or forced dark mode
+            ((activity as ThemedActivity).isDarkTheme() || darkMode)) {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK_STRATEGY)) {
+                if (darkMode) {
+                    // User requested forced dark mode from menu, we need to enable user agent dark mode then.
+                    WebSettingsCompat.setForceDarkStrategy(
+                        settings,
+                        // Looks like that flag it's not working and will just do user agent dark mode even if page supports dark web theme.
+                        // That means that when using app light theme you can't get dark web theme, you will just get user agent dark theme.
+                        // No big deal though, just use app dark theme if you want proper web dark theme.
+                        WebSettingsCompat.DARK_STRATEGY_PREFER_WEB_THEME_OVER_USER_AGENT_DARKENING
+                    )
                 } else {
-                    // WebView force dark mode is not supported.
-                    if (darkMode) {
-                        // Fallback to our special rendering mode then if user requests dark mode
-                        setColorMode(RenderingMode.INVERTED_GRAYSCALE)
-                    } else {
-                        setColorMode(userPreferences.renderingMode)
-                    }
+                    // We are in app dark theme but this page does not forces to dark mode
+                    // Just request dark web theme then.
+                    // That's actually the only way to dark web theme rather than user agent darkening, see above comment.
+                    WebSettingsCompat.setForceDarkStrategy(
+                        settings,
+                        WebSettingsCompat.DARK_STRATEGY_WEB_THEME_DARKENING_ONLY
+                    )
+                }
+            }
+
+            // We are either in app dark theme or forced dark mode, just request dark theme without actually forcing it.
+            // Yes I know that flag's name is misleading to say the least.
+            WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_ON)
+        } else {
+            // We are neither app dark theme or force dark mode or force dark mode is not supported.
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                // We are in app light theme and force dark mode is disabled therefore:
+                WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF)
+            } else {
+                // WebView force dark mode is not supported.
+                if (darkMode) {
+                    // Fallback to our special rendering mode then if user requests dark mode
+                    // TODO: Have a setting option to make this the default behaviour?
+                    setColorMode(RenderingMode.INVERTED_GRAYSCALE)
+                } else {
+                    setColorMode(userPreferences.renderingMode)
                 }
             }
         }
@@ -826,16 +819,6 @@ class WebPageTab(
             // Needed to prevent CTRL+TAB to scroll back to top of the page
             // See: https://github.com/Slion/Fulguris/issues/82
             setNeedInitialFocus(false)
-
-
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-                getPathObservable("geolocation")
-                    .subscribeOn(databaseScheduler)
-                    .observeOn(mainScheduler)
-                    .subscribe { file ->
-                        setGeolocationDatabasePath(file.path)
-                    }
-            }
         }
 
     }
@@ -861,22 +844,6 @@ class WebPageTab(
         // Toggle dark mode
         darkMode = !darkMode
         darkModeBypassDomainSettings = aBypass
-    }
-
-    /**
-     * Inject Eruda DevTools into the current web page for debugging.
-     */
-    fun injectErudaDevTools() {
-        webView?.let { view ->
-            try {
-                val erudaScript = activity.assets.open("eruda.min.js").bufferedReader().use { it.readText() }
-                view.evaluateJavascript(erudaScript) {
-                    view.evaluateJavascript("if (typeof eruda !== 'undefined') eruda.init();", null)
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "Failed to inject Eruda DevTools")
-            }
-        }
     }
 
 
@@ -1635,17 +1602,6 @@ class WebPageTab(
             val src = msg.data.getString("src")
             //
             reference.get()?.longClickPage(url,title,src)
-        }
-    }
-
-    /**
-     * Hibernates the tab by saving its state and destroying its WebView instance to free memory.
-     */
-    fun freeze() {
-        if (webView != null && !isForeground) {
-            latentTabInitializer = FreezableBundleInitializer(getModel())
-            webView?.removeFromParent()
-            destroyWebView()
         }
     }
 

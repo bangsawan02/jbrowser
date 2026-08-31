@@ -76,23 +76,11 @@ const val ABP_ENTITIES = "abpEntities"
 val ABP_ENTITY_EASYLIST = AbpEntity(title = "EasyList", entityId = 2, url = "https://easylist.to/easylist/easylist.txt", homePage = "https://easylist.to")
 val ABP_ENTITY_EASYPRIVACY = AbpEntity(title = "EasyPrivacy", entityId = 3, url = "https://easylist.to/easylist/easyprivacy.txt", homePage = "https://easylist.to")
 val ABP_ENTITY_URLHAUS = AbpEntity(title = "Urlhaus Malicious URL Blocklist", entityId = 4, url = "https://raw.githubusercontent.com/curbengh/urlhaus-filter/master/urlhaus-filter-agh-online.txt", homePage = "https://gitlab.com/curben/urlhaus-filter")
-val ABP_ENTITY_STEVEN_BLACK = AbpEntity(title = "StevenBlack hosts list", entityId = 5, url = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts", homePage = "https://github.com/StevenBlack/hosts", enabled = true)
-val ABP_ENTITY_UBLOCK_FILTERS = AbpEntity(title = "uBlock Filters", entityId = 6, url = "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt", homePage = "https://github.com/uBlockOrigin/uAssets")
-val ABP_ENTITY_UBLOCK_PRIVACY = AbpEntity(title = "uBlock Privacy Filters", entityId = 7, url = "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt", homePage = "https://github.com/uBlockOrigin/uAssets")
-val ABP_ENTITY_ADGUARD_BASE = AbpEntity(title = "AdGuard Base Filter", entityId = 8, url = "https://filters.adtidy.org/extension/ublock/filters/2.txt", homePage = "https://adguard.com")
-val ABP_ENTITY_ADGUARD_ANNOYANCES = AbpEntity(title = "AdGuard Annoyances (Cookie notices, popups)", entityId = 9, url = "https://filters.adtidy.org/extension/ublock/filters/14.txt", homePage = "https://adguard.com")
-val ABP_ENTITY_FANBOY_ANNOYANCES = AbpEntity(title = "Fanboy Annoyances (Social widgets, cookie notices)", entityId = 10, url = "https://easylist.to/easylist/fanboy-annoyance.txt", homePage = "https://easylist.to")
-val ABP_ENTITY_PETER_LOWES = AbpEntity(title = "Peter Lowe's Ad and tracking server list", entityId = 11, url = "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=1&mimetype=plaintext", homePage = "https://pgl.yoyo.org/adservers/")
+val ABP_ENTITY_STEVEN_BLACK = AbpEntity(title = "StevenBlack hosts list", entityId = 5, url = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts", homePage = "https://github.com/StevenBlack/hosts", enabled = false)
 
 val ABP_DEFAULT_ENTITIES = setOf(
     ABP_ENTITY_EASYLIST.toString(),
     ABP_ENTITY_EASYPRIVACY.toString(),
     ABP_ENTITY_URLHAUS.toString(),
     ABP_ENTITY_STEVEN_BLACK.toString(),
-    ABP_ENTITY_UBLOCK_FILTERS.toString(),
-    ABP_ENTITY_UBLOCK_PRIVACY.toString(),
-    ABP_ENTITY_ADGUARD_BASE.toString(),
-    ABP_ENTITY_ADGUARD_ANNOYANCES.toString(),
-    ABP_ENTITY_FANBOY_ANNOYANCES.toString(),
-    ABP_ENTITY_PETER_LOWES.toString(),
 )

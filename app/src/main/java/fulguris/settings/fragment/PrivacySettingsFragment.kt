@@ -49,10 +49,19 @@ class PrivacySettingsFragment : AbstractSettingsFragment() {
         super.onCreatePreferences(savedInstanceState, rootKey)
         //injector.inject(this)
 
-        // Firebase analytics and crash reporting removed - always hide these prefs
-        findPreference<Preference>(getString(R.string.pref_key_analytics))?.isVisible = false
-        findPreference<Preference>(getString(R.string.pref_key_crash_report))?.isVisible = false
+        // Hide analytics option if corresponding Firebase class not present
+        try {
+            Class.forName("com.google.firebase.analytics.FirebaseAnalytics")
+        } catch (ex: Exception) {
+            findPreference<Preference>(getString(R.string.pref_key_analytics))?.isVisible = false
+        }
 
+        // Hide crash report option if corresponding Firebase class not present
+        try {
+            Class.forName("com.google.firebase.crashlytics.FirebaseCrashlytics")
+        } catch (ex: Exception) {
+            findPreference<Preference>(getString(R.string.pref_key_crash_report))?.isVisible = false
+        }
 
         clickablePreference(preference = SETTINGS_CLEARCACHE, onClick = this::clearCache)
         clickablePreference(preference = SETTINGS_CLEARHISTORY, onClick = this::clearHistoryDialog)
@@ -67,7 +76,7 @@ class PrivacySettingsFragment : AbstractSettingsFragment() {
             isChecked = userPreferences.savePasswordsEnabled,
             onCheckChange = { userPreferences.savePasswordsEnabled = it }
         // From Android O auto-fill framework is used instead
-        ).isVisible = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+        ).isVisible = false
 
         switchPreference(
             preference = SETTINGS_CACHEEXIT,

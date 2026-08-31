@@ -320,7 +320,7 @@ class DisplaySettingsFragment : AbstractSettingsFragment() {
             }
             setOnCancelListener {
                 if (currentAccent != userPreferences.useAccent) {
-                    (activity as AppCompatActivity).onBackPressed()
+                    requireActivity().onBackPressedDispatcher.onBackPressed()
                 }
             }
         }.launch()

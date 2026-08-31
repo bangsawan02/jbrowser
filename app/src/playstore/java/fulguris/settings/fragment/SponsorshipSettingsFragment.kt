@@ -36,7 +36,7 @@ import androidx.preference.Preference
 import com.android.billingclient.api.*
 import dagger.hilt.android.AndroidEntryPoint
 // See: https://stackoverflow.com/a/54188472/3969362
-import org.threeten.bp.Period
+import java.time.Period
 import timber.log.Timber
 import javax.inject.Inject
 

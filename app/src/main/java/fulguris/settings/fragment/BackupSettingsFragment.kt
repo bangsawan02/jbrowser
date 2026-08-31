@@ -671,6 +671,7 @@ class BackupSettingsFragment : AbstractSettingsFragment() {
         activity?.snackbar(R.string.settings_reseted)
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         val uri: Uri? = data?.data
         if(requestCode == EXPORT_SETTINGS && resultCode == Activity.RESULT_OK) {

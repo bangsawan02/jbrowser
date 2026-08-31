@@ -61,16 +61,15 @@ import androidx.customview.widget.ViewDragHelper
 import androidx.databinding.DataBindingUtil
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.fragment.app.FragmentManager
 import androidx.palette.graphics.Palette
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.android.volley.*
+import com.android.volley.toolbox.JsonObjectRequest
+import com.android.volley.toolbox.Volley
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -238,6 +237,7 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
     }
 
     // HTTP
+    private lateinit var queue: RequestQueue
 
     // Image
     private val backgroundDrawable = ColorDrawable()
@@ -442,6 +442,7 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         iBinding.findInPageInclude.buttonBack.setOnClickListener(this)
         iBinding.findInPageInclude.buttonQuit.setOnClickListener(this)
 
+        queue = Volley.newRequestQueue(this)
         createMenuCustom()
         createMenuSessions()
         createCursorController()
@@ -780,7 +781,6 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
             onMenuItemClicked(iBinding.menuItemAddBookmark) { dismiss(); executeAction(R.id.action_add_bookmark) }
             onMenuItemClicked(iBinding.menuItemFind) { dismiss(); executeAction(R.id.action_find) }
             onMenuItemClicked(iBinding.menuItemPrint) { dismiss(); executeAction(R.id.action_print) }
-            onMenuItemClicked(iBinding.menuItemErudaDevTools) { dismiss(); executeAction(R.id.action_eruda_devtools) }
             onMenuItemClicked(iBinding.menuItemAddToHome) { dismiss(); executeAction(R.id.action_add_to_homescreen) }
             onMenuItemClicked(iBinding.menuItemReaderMode) { dismiss(); executeAction(R.id.action_reading_mode) }
             onMenuItemClicked(iBinding.menuItemDesktopMode) { dismiss(); executeAction(R.id.action_toggle_desktop_mode) }
@@ -1937,11 +1937,6 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         override fun onDrawerSlide(v: View, arg: Float) = Unit
 
         override fun onDrawerStateChanged(arg: Int) {
-
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-                return;
-            }
-
             // Make sure status bar icons have the proper color set when we start opening and closing a drawer
             // We set status bar icon color according to current theme
             if (arg == ViewDragHelper.STATE_SETTLING) {
@@ -2760,7 +2755,7 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
                 return true
             }
             R.id.action_settings -> {
-                startActivity(Intent(this, SettingsActivity::class.java))
+                startActivity(Intent(this, fulguris.settings.compose.SettingsComposeActivity::class.java))
                 // Was there just for testing it
                 //onMaxTabReached()
                 return true
@@ -2806,11 +2801,6 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
 
             R.id.action_print -> {
                 currentTabView?.print()
-                return true
-            }
-
-            R.id.action_eruda_devtools -> {
-                tabsManager.currentTab?.injectErudaDevTools()
                 return true
             }
             R.id.action_reading_mode -> {
@@ -3988,6 +3978,7 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
         // Though I'm pretty sure this activity is locked in some other ways, probably a lost cause at this stage...
         iPlaceHolder = null
         //
+        queue.cancelAll(TAG)
 
         incognitoNotification?.hide()
 
@@ -4775,32 +4766,22 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
     /**
      * used to allow uploading into the browser
      */
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, intent: Intent?) {
         if (requestCode == FILE_CHOOSER_REQUEST_CODE) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-                val result = if (intent == null || resultCode != Activity.RESULT_OK) {
-                    null
+            val results: Array<Uri>? = if (resultCode == Activity.RESULT_OK) {
+                if (intent == null) {
+                    // If there is not data, then we may have taken a photo
+                    cameraPhotoPath?.let { arrayOf(it.toUri()) }
                 } else {
-                    intent.data
+                    intent.dataString?.let { arrayOf(it.toUri()) }
                 }
-
-                uploadMessageCallback?.onReceiveValue(result)
-                uploadMessageCallback = null
             } else {
-                val results: Array<Uri>? = if (resultCode == Activity.RESULT_OK) {
-                    if (intent == null) {
-                        // If there is not data, then we may have taken a photo
-                        cameraPhotoPath?.let { arrayOf(it.toUri()) }
-                    } else {
-                        intent.dataString?.let { arrayOf(it.toUri()) }
-                    }
-                } else {
-                    null
-                }
-
-                filePathCallback?.onReceiveValue(results)
-                filePathCallback = null
+                null
             }
+
+            filePathCallback?.onReceiveValue(results)
+            filePathCallback = null
         } else {
             super.onActivityResult(requestCode, resultCode, intent)
         }
@@ -5443,40 +5424,48 @@ abstract class WebBrowserActivity : ThemedBrowserActivity(),
      * Check for update on slions.net.
      */
     private fun checkForUpdates() {
-        val urlString = getString(R.string.slions_update_check_url)
-        val apiKey = getString(R.string.slions_api_key)
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val url = java.net.URL(urlString)
-                val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.requestMethod = "GET"
-                conn.setRequestProperty("XF-Api-Key", apiKey)
-                conn.connectTimeout = 10000
-                conn.readTimeout = 10000
-                if (conn.responseCode == 200) {
-                    val text = conn.inputStream.bufferedReader().use { it.readText() }
-                    val response = JSONObject(text)
+        val url = getString(R.string.slions_update_check_url)
+        // Request a JSON object response from the provided URL.
+        val request = object: JsonObjectRequest(Request.Method.GET, url, null,
+                Response.Listener<JSONObject> { response ->
+
                     val latestVersion = response.getJSONArray("versions").getJSONObject(0).getString("version_string")
                     if (latestVersion != BuildConfig.VERSION_NAME) {
-                        withContext(Dispatchers.Main) {
-                            if (!isFinishing && !isDestroyed) {
-                                makeSnackbar(
-                                    getString(R.string.update_available) + " - v" + latestVersion, 5000, if (configPrefs.toolbarsBottom) Gravity.TOP else Gravity.BOTTOM)
-                                    .setAction(R.string.show) {
-                                        val pageUrl = getString(R.string.url_app_home_page)
-                                        val i = Intent(Intent.ACTION_VIEW)
-                                        i.data = Uri.parse(pageUrl)
-                                        i.putExtra("PACKAGE", packageName)
-                                        startActivity(i)
-                                    }.show()
-                            }
-                        }
+                        // We have an update available, tell our user about it
+                        makeSnackbar(
+                                getString(R.string.update_available) + " - v" + latestVersion, 5000, if (configPrefs.toolbarsBottom) Gravity.TOP else Gravity.BOTTOM) //Snackbar.LENGTH_LONG
+                                .setAction(R.string.show, OnClickListener {
+                                    val url = getString(R.string.url_app_home_page)
+                                    val i = Intent(Intent.ACTION_VIEW)
+                                    i.data = Uri.parse(url)
+                                    // Make sure we don't send ourselves to the background when closing a tab we opened ourselves
+                                    i.putExtra("PACKAGE", packageName)
+                                    startActivity(i)
+                                }).show()
                     }
+
+                    //Log.d(TAG,response.toString())
+                },
+                Response.ErrorListener { error: VolleyError ->
+                    // Just ignore error for background update check
+                    // Use the following for network status code
+                    // Though networkResponse can be null in flight mode for instance
+                    // error.networkResponse.statusCode.toString()
+
                 }
-            } catch (e: Exception) {
-                Timber.e(e, "Error checking for updates")
+        ){
+            @Throws(AuthFailureError::class)
+            override fun getHeaders(): Map<String, String> {
+                val params: MutableMap<String, String> = HashMap()
+                // Provide here slions.net API key as part of this requests HTTP headers
+                params["XF-Api-Key"] = getString(R.string.slions_api_key)
+                return params
             }
         }
+
+        request.tag = TAG
+        // Add the request to the RequestQueue.
+        queue.add(request)
     }
 
     var iLastTouchUpPosition: Point = Point()

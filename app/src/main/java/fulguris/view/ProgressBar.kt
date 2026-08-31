@@ -28,6 +28,7 @@ import android.os.Parcelable
 import android.util.AttributeSet
 import android.view.View
 import android.view.animation.Animation
+import androidx.core.os.BundleCompat
 import android.view.animation.Interpolator
 import android.view.animation.LinearInterpolator
 import android.view.animation.Transformation
@@ -173,7 +174,7 @@ class ProgressBar : View {
         if (state is Bundle) {
             val bundle = state
             mProgress = bundle.getInt("progressState")
-            state = bundle.getParcelable("instanceState")
+            state = BundleCompat.getParcelable(bundle, "instanceState", Parcelable::class.java)
         }
         super.onRestoreInstanceState(state)
     }

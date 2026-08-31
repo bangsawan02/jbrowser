@@ -1,0 +1,6 @@
+# iOS L10N Tools - Coming Soon
+
+This directory will contain iOS localization tools including:
+- Strings file management (.strings, .stringsdict)
+- XLIFF export/import
+- App Store Connect metadata management

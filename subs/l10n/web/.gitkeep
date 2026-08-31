@@ -1,0 +1,6 @@
+# Web L10N Tools - Coming Soon
+
+This directory will contain web localization tools including:
+- JSON/YAML translation file management
+- i18n framework integration
+- Translation service sync (Crowdin, Lokalise, etc.)

@@ -33,7 +33,6 @@ import android.view.inputmethod.InputMethodManager
 import androidx.annotation.RequiresApi
 import androidx.core.content.getSystemService
 import androidx.preference.PreferenceManager
-import com.anthonycr.mezzanine.mezzanine
 import fulguris.html.incognito.IncognitoPageReader
 import dagger.Module
 import dagger.Provides
@@ -175,38 +174,85 @@ class AppModule {
     }.cache()
 
 
-    @Provides
-    fun providesListPageReader(): ListPageReader = mezzanine<ListPageReader>()
+    private fun AssetManager.readTextFile(path: String): String =
+        open(path).bufferedReader().use { it.readText() }
 
     @Provides
-    fun providesHomePageReader(): HomePageReader = mezzanine<HomePageReader>()
+    @Singleton
+    fun providesListPageReader(assetManager: AssetManager): ListPageReader = object : ListPageReader {
+        private val content by lazy { assetManager.readTextFile("html/list.html") }
+        override fun provideHtml(): String = content
+    }
 
     @Provides
-    fun providesIncognitoPageReader(): IncognitoPageReader = mezzanine<IncognitoPageReader>()
+    @Singleton
+    fun providesHomePageReader(assetManager: AssetManager): HomePageReader = object : HomePageReader {
+        private val content by lazy { assetManager.readTextFile("html/homepage.html") }
+        override fun provideHtml(): String = content
+    }
 
     @Provides
-    fun providesBookmarkPageReader(): BookmarkPageReader = mezzanine<BookmarkPageReader>()
+    @Singleton
+    fun providesIncognitoPageReader(assetManager: AssetManager): IncognitoPageReader = object : IncognitoPageReader {
+        private val content by lazy { assetManager.readTextFile("html/private.html") }
+        override fun provideHtml(): String = content
+    }
 
     @Provides
-    fun providesTextReflow(): TextReflow = mezzanine<TextReflow>()
+    @Singleton
+    fun providesBookmarkPageReader(assetManager: AssetManager): BookmarkPageReader = object : BookmarkPageReader {
+        private val content by lazy { assetManager.readTextFile("html/bookmarks.html") }
+        override fun provideHtml(): String = content
+    }
 
     @Provides
-    fun providesThemeColor(): ThemeColor = mezzanine<ThemeColor>()
+    @Singleton
+    fun providesTextReflow(assetManager: AssetManager): TextReflow = object : TextReflow {
+        private val content by lazy { assetManager.readTextFile("js/TextReflow.js") }
+        override fun provideJs(): String = content
+    }
 
     @Provides
-    fun providesInvertPage(): InvertPage = mezzanine<InvertPage>()
+    @Singleton
+    fun providesThemeColor(assetManager: AssetManager): ThemeColor = object : ThemeColor {
+        private val content by lazy { assetManager.readTextFile("js/ThemeColor.js") }
+        override fun provideJs(): String = content
+    }
 
     @Provides
-    fun providesSetMetaViewport(): SetMetaViewport = mezzanine<SetMetaViewport>()
+    @Singleton
+    fun providesInvertPage(assetManager: AssetManager): InvertPage = object : InvertPage {
+        private val content by lazy { assetManager.readTextFile("js/InvertPage.js") }
+        override fun provideJs(): String = content
+    }
 
     @Provides
-    fun providesNestedScrollDetect(): NestedScrollDetect = mezzanine<NestedScrollDetect>()
+    @Singleton
+    fun providesSetMetaViewport(assetManager: AssetManager): SetMetaViewport = object : SetMetaViewport {
+        private val content by lazy { assetManager.readTextFile("js/SetMetaViewport.js") }
+        override fun provideJs(): String = content
+    }
 
     @Provides
-    fun providesBlobDownload(): BlobDownload = mezzanine<BlobDownload>()
+    @Singleton
+    fun providesNestedScrollDetect(assetManager: AssetManager): NestedScrollDetect = object : NestedScrollDetect {
+        private val content by lazy { assetManager.readTextFile("js/NestedScrollDetect.js") }
+        override fun provideJs(): String = content
+    }
 
     @Provides
-    fun providesBlobHook(): BlobHook = mezzanine<BlobHook>()
+    @Singleton
+    fun providesBlobDownload(assetManager: AssetManager): BlobDownload = object : BlobDownload {
+        private val content by lazy { assetManager.readTextFile("js/BlobDownload.js") }
+        override fun provideJs(): String = content
+    }
+
+    @Provides
+    @Singleton
+    fun providesBlobHook(assetManager: AssetManager): BlobHook = object : BlobHook {
+        private val content by lazy { assetManager.readTextFile("js/BlobHook.js") }
+        override fun provideJs(): String = content
+    }
 }
 
 @Qualifier

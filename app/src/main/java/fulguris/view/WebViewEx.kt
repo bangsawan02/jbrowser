@@ -2,7 +2,6 @@ package fulguris.view
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.print.PrintAttributes
@@ -238,10 +237,7 @@ class WebViewEx : WebView {
         clearHistory()
         visibility = View.GONE
         removeAllViews()
-        @Suppress("DEPRECATION")
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-            destroyDrawingCache()
-        }
+        destroyDrawingCache()
         destroy()
     }
 

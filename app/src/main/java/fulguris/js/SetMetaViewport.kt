@@ -22,12 +22,9 @@
 
 package fulguris.js
 
-import com.anthonycr.mezzanine.FileStream
-
 /**
  * Set HTML meta viewport thus enabling desktop mode or other zoom trick.
  */
-@FileStream("src/main/js/SetMetaViewport.js")
 interface SetMetaViewport {
 
     fun provideJs(): String

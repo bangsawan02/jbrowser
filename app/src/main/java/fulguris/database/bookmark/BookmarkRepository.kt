@@ -127,16 +127,11 @@ interface BookmarkRepository {
     fun getFolderNames(): Single<List<String>>
 
     /**
-    * A synchronous call to the model that returns the number of bookmarks. Should be called from a
-    * background thread.
-    *
-    * @return the number of bookmarks in the database.
-    */
-   @WorkerThread
-   fun count(): Long
-
-   // --- Kotlin Coroutines Async API ---
-   suspend fun getBookmark(url: String): Bookmark.Entry? = findBookmarkForUrl(url).blockingGet()
-   suspend fun isBookmarkUrl(url: String): Boolean = isBookmark(url).blockingGet()
-   suspend fun getAllBookmarks(): List<Bookmark.Entry> = getAllBookmarksSorted().blockingGet()
+     * A synchronous call to the model that returns the number of bookmarks. Should be called from a
+     * background thread.
+     *
+     * @return the number of bookmarks in the database.
+     */
+    @WorkerThread
+    fun count(): Long
 }

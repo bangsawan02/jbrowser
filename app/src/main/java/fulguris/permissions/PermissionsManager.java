@@ -241,18 +241,14 @@ public class PermissionsManager {
             return;
         }
         addPendingAction(permissions, action);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            doPermissionWorkBeforeAndroidM(activity, permissions, action);
+        List<String> permList = getPermissionsListToRequest(activity, permissions, action);
+        if (permList.isEmpty()) {
+            //if there is no permission to request, there is no reason to keep the action int the list
+            removePendingAction(action);
         } else {
-            List<String> permList = getPermissionsListToRequest(activity, permissions, action);
-            if (permList.isEmpty()) {
-                //if there is no permission to request, there is no reason to keep the action int the list
-                removePendingAction(action);
-            } else {
-                String[] permsToRequest = permList.toArray(new String[permList.size()]);
-                mPendingRequests.addAll(permList);
-                ActivityCompat.requestPermissions(activity, permsToRequest, 1);
-            }
+            String[] permsToRequest = permList.toArray(new String[permList.size()]);
+            mPendingRequests.addAll(permList);
+            ActivityCompat.requestPermissions(activity, permsToRequest, 1);
         }
     }
 
@@ -278,18 +274,14 @@ public class PermissionsManager {
             return;
         }
         addPendingAction(permissions, action);
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            doPermissionWorkBeforeAndroidM(activity, permissions, action);
+        List<String> permList = getPermissionsListToRequest(activity, permissions, action);
+        if (permList.isEmpty()) {
+            //if there is no permission to request, there is no reason to keep the action int the list
+            removePendingAction(action);
         } else {
-            List<String> permList = getPermissionsListToRequest(activity, permissions, action);
-            if (permList.isEmpty()) {
-                //if there is no permission to request, there is no reason to keep the action int the list
-                removePendingAction(action);
-            } else {
-                String[] permsToRequest = permList.toArray(new String[permList.size()]);
-                mPendingRequests.addAll(permList);
-                fragment.requestPermissions(permsToRequest, 1);
-            }
+            String[] permsToRequest = permList.toArray(new String[permList.size()]);
+            mPendingRequests.addAll(permList);
+            fragment.requestPermissions(permsToRequest, 1);
         }
     }
 

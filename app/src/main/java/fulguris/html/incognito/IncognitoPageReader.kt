@@ -6,12 +6,9 @@
 
 package fulguris.html.incognito
 
-import com.anthonycr.mezzanine.FileStream
-
 /**
  * The store for the incognito HTML.
  */
-@FileStream("src/main/html/private.html")
 interface IncognitoPageReader {
 
     fun provideHtml(): String

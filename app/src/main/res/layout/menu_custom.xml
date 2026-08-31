@@ -368,14 +368,6 @@
                         android:text="@string/action_cookies" />
 
                     <TextView
-                        android:id="@+id/menuItemErudaDevTools"
-                        style="@style/BrowserTextMenuItem"
-                        android:visibility="gone"
-                        tools:visibility="visible"
-                        app:drawableStartCompat="@drawable/ic_terminal_outline"
-                        android:text="@string/action_eruda_devtools" />
-
-                    <TextView
                         android:id="@+id/menuItemPrint"
                         style="@style/BrowserTextMenuItem"
                         android:visibility="gone"

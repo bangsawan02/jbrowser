@@ -78,3 +78,11 @@ vendor/bundle
 crowdin.properties
 __pycache__
 .kotlin
+*.zip
+jbrowser_extracted/
+jbrowser_re_extracted/
+app_build_gradle_backup
+debug.keystore
+debug.keystore.base64
+
+

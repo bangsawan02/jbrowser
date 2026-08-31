@@ -1,0 +1,6 @@
+{
+  "name": "Fulguris",
+  "description": "A powerful, lightweight Android web browser with advanced privacy features and a clean interface.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -34,11 +34,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.DialogInterface
 import android.content.Intent
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import timber.log.Timber
+import android.os.AsyncTask
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.text.Html
@@ -151,10 +147,34 @@ class ReadingActivity : ThemedActivity(), TextToSpeech.OnInitListener {
         return super.onCreateOptionsMenu(menu)
     }
 
-    private fun executeLoadData() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            var extractedContentHtmlWithUtf8Encoding: String? = null
-            var title: String? = null
+    private inner class loadData : AsyncTask<Void?, Void?, Void?>() {
+        var extractedContentHtml: String? = null
+        var extractedContentHtmlWithUtf8Encoding: String? = null
+        var extractedContentPlainText: String? = null
+        var title: String? = null
+        var byline: String? = null
+        var excerpt: String? = null
+
+
+        override fun onPostExecute(aVoid: Void?) {
+            val html: String? = extractedContentHtmlWithUtf8Encoding?.replace("image copyright".toRegex(), resources.getString(R.string.reading_mode_image_copyright) + " ")?.replace("image caption".toRegex(), resources.getString(R.string.reading_mode_image_caption) + " ")?.replace("￼".toRegex(), "")
+            try {
+                val doc = Jsoup.parse(html)
+                for (element in doc.select("img")) {
+                    element.remove()
+                }
+                setText(title, doc.outerHtml())
+                dismissProgressDialog()
+            }
+            catch (e: Exception){
+                mTitle!!.alpha = 1.0f
+                mTitle!!.visibility = View.VISIBLE
+                mTitle?.text = resources.getString(R.string.title_error)
+                dismissProgressDialog()
+            }
+        }
+
+        override fun doInBackground(vararg params: Void?): Void? {
             try {
                 val google = URL(mUrl)
                 val line = BufferedReader(InputStreamReader(google.openStream()))
@@ -165,36 +185,18 @@ class ReadingActivity : ThemedActivity(), TextToSpeech.OnInitListener {
                 }
                 line.close()
                 val htmlData = stringBuffer.toString()
-                val readability4J = Readability4J(mUrl!!, htmlData)
+                val readability4J = Readability4J(mUrl!!, htmlData) // url is just needed to resolve relative urls
                 val article = readability4J.parse()
+                extractedContentHtml = article.content
                 extractedContentHtmlWithUtf8Encoding = article.contentWithUtf8Encoding
+                extractedContentPlainText = article.textContent
                 title = article.title
-            } catch (e: Exception) {
-                Timber.e(e, "Error loading reading mode content")
+                byline = article.byline
+                excerpt = article.excerpt
+            } catch (e: IOException) {
+                e.printStackTrace()
             }
-
-            val html: String? = extractedContentHtmlWithUtf8Encoding
-                ?.replace("image copyright".toRegex(), resources.getString(R.string.reading_mode_image_copyright) + " ")
-                ?.replace("image caption".toRegex(), resources.getString(R.string.reading_mode_image_caption) + " ")
-                ?.replace("￼".toRegex(), "")
-
-            withContext(Dispatchers.Main) {
-                if (!isFinishing && !isDestroyed) {
-                    try {
-                        val doc = Jsoup.parse(html ?: "")
-                        for (element in doc.select("img")) {
-                            element.remove()
-                        }
-                        setText(title, doc.outerHtml())
-                        dismissProgressDialog()
-                    } catch (e: Exception) {
-                        mTitle?.alpha = 1.0f
-                        mTitle?.visibility = View.VISIBLE
-                        mTitle?.text = resources.getString(R.string.title_error)
-                        dismissProgressDialog()
-                    }
-                }
-            }
+            return null
         }
     }
 
@@ -207,7 +209,7 @@ class ReadingActivity : ThemedActivity(), TextToSpeech.OnInitListener {
                 mTitle!!.text = getString(R.string.untitled)
                 mBody!!.text = getString(R.string.loading)
                 mUrl = span?.url
-                executeLoadData()
+                loadData().execute()
                 // TODO: somehow TTS is broken after following a link
                 // Restarting the activity does not help for some reason
                 // We ought to check TTS error codes and debug that at some point
@@ -260,7 +262,7 @@ class ReadingActivity : ThemedActivity(), TextToSpeech.OnInitListener {
         mProgressDialog!!.show()
 
 
-        executeLoadData()
+        loadData().execute()
         return true
     }
 

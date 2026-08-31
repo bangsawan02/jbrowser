@@ -449,6 +449,7 @@ class AdBlockSettingsFragment : AbstractSettingsFragment() {
         }
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == FILE_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK) {

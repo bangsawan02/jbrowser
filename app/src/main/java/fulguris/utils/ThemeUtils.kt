@@ -189,11 +189,8 @@ object ThemeUtils {
 
     @JvmStatic
     private fun getVectorDrawable(context: Context, drawableId: Int): Drawable {
-        var drawable = ContextCompat.getDrawable(context, drawableId)
+        val drawable = ContextCompat.getDrawable(context, drawableId)
         fulguris.utils.Preconditions.checkNonNull(drawable)
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-            drawable = DrawableCompat.wrap(drawable!!).mutate()
-        }
         return drawable!!
     }
 
