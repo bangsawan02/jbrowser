@@ -61,6 +61,7 @@ android {
         minSdk = libs.versions.minSdk.get().toInteger()
         targetSdk = 34
         vectorDrawables.useSupportLibrary = true
+        resConfigs "en"
     }
 
     aaptOptions {
