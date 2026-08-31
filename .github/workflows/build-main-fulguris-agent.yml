@@ -33,3 +33,9 @@ jobs:
 
       - name: Build Agent variants
         run: ./gradlew assembleSlionsFullAgent
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fulguris-agent-apks
+          path: app/build/outputs/apk/**/*.apk
